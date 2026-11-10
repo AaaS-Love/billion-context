@@ -549,7 +549,20 @@ export async function fetchWithRetry(
             continue;
         }
         if (result.response.ok) return result;
-        const errText = await result.response.text().catch(() => "upstream error");
+        // #6133: a non-ok response whose BODY fails to read (transport body-
+        // timeout, abort, mid-stream reset) never completed — its status is not
+        // a reliable verdict and the body text needed for transient
+        // classification is absent. Replaying on such a status stacks the full
+        // idle budget across attempts and hides the real transport cause, so
+        // clear the watchdog and surface the error unchanged. A fully-received
+        // error body still follows the normal HTTP-retry path below.
+        let errText: string;
+        try {
+            errText = await result.response.text();
+        } catch (bodyReadError) {
+            result.clearTimer();
+            throw bodyReadError;
+        }
         result.clearTimer();
         const lastAttempt = attempt >= maxAttempts;
         if (!lastAttempt && isTransientUpstreamError(result.response.status, errText)) {
