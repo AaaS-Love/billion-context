@@ -17,7 +17,7 @@
 FROM node:24-slim AS build
 WORKDIR /src
 COPY . .
-RUN npm ci --no-audit --no-fund --ignore-scripts && npm --prefix kernel ci --no-audit --no-fund --ignore-scripts && npm --prefix pi-subagents ci --no-audit --no-fund --ignore-scripts && npm run build && npm pack --ignore-scripts --pack-destination /out
+RUN npm ci --no-audit --no-fund --ignore-scripts && npm --prefix kernel ci --no-audit --no-fund --ignore-scripts && npm --prefix pi-subagents ci --no-audit --no-fund --ignore-scripts && npm run build && mkdir -p /out && npm pack --ignore-scripts --pack-destination /out
 
 FROM node:24-slim
 COPY --from=build /out/*.tgz /tmp/

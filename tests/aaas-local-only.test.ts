@@ -122,9 +122,14 @@ test("config forces every remote feature off", async () => {
     assert.throws(() => loadOptions({ ...process.env, ACP_HOST: "0.0.0.0" }), /loopback only/);
 });
 
-test("doctor --fix refuses before auditing and writes nothing", () => {
+test("doctor --fix refuses before auditing: no spawn, DNS or connect happens", () => {
     const home = freshHome();
-    const r = spawnSync(process.execPath, [ENTRY, "doctor", "--fix"], { env: envFor(home, {}), encoding: "utf8", timeout: 20_000 });
+    const log = join(home, "fix.jsonl");
+    const r = spawnSync(process.execPath, ["--require", PRELOAD, ENTRY, "doctor", "--fix"], { env: envFor(home, { EGRESS_LOG: log }), encoding: "utf8", timeout: 20_000 });
     assert.equal(r.status, 2, `${r.stdout}${r.stderr}`);
     assert.match(r.stderr, /removed in the AaaS fork/);
+    const entries = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
+    // Node itself may spawn icacls at startup on Windows; the audit signature is registry probes (reg), DNS or connects.
+    const audit = entries.filter((e) => e.kind !== "spawn" || /(^|[\/\\])reg(\.exe)?$/i.test(String(e.cmd)));
+    assert.deepEqual(audit, [], "the audit started before the refusal");
 });
