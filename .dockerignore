@@ -1,4 +1,6 @@
-# The Dockerfile installs from npm at build time and COPYs nothing from the
-# context — keep the context minimal when building from the repo root.
-*
-!Dockerfile
+# Build context for the AaaS fork Dockerfile: the source tree, minus build output and VCS data.
+node_modules
+**/node_modules
+dist
+**/dist
+.git

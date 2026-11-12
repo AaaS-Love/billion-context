@@ -121,3 +121,10 @@ test("config forces every remote feature off", async () => {
     assert.equal(o.mitm.enabled, false);
     assert.throws(() => loadOptions({ ...process.env, ACP_HOST: "0.0.0.0" }), /loopback only/);
 });
+
+test("doctor --fix refuses before auditing and writes nothing", () => {
+    const home = freshHome();
+    const r = spawnSync(process.execPath, [ENTRY, "doctor", "--fix"], { env: envFor(home, {}), encoding: "utf8", timeout: 20_000 });
+    assert.equal(r.status, 2, `${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /removed in the AaaS fork/);
+});

@@ -55,7 +55,7 @@ import { runSessionsCommand, runStorageGcCommand } from "./storage-maintenance.j
 import { installPackFromNpm, removePackFile } from "./pack-install.js";
 import { listResolvedPacks } from "./compress-settings.js";
 import { renderJson, renderText, runDiff } from "./acp-cache-diff.js";
-import { fixDshLedgers, renderDoctorReport, renderLedgerFixReport, runDoctor } from "./doctor.js";
+import { renderDoctorReport, runDoctor } from "./doctor.js";
 import { VERSION, PACKAGE_NAME, BUILD_COMMIT } from "./version.js";
 
 const HELP = `bili ${VERSION} — billion-context proxy
@@ -781,6 +781,11 @@ export async function main(): Promise<void> {
         return;
     }
     if (command === "doctor") {
+        if (doctorFix) {
+            // AaaS fork: --fix writes dsh profile manifests/lockfiles; refused (the audit stays read-only).
+            console.error("bili doctor --fix: removed in the AaaS fork (read-only audit only). See docs/AAAS-FORK.md.");
+            process.exit(2);
+        }
         // Read-only lane audit (#1235). Same egress/channel wiring as `bili
         // update` so the registry freshness check honors -F and updateTag.
         for (const [k, v] of Object.entries(overrides)) {
@@ -799,22 +804,7 @@ export async function main(): Promise<void> {
         }
         try {
             const report = await runDoctor({ packageName: PACKAGE_NAME, runningVersion: VERSION, resolveProxy: updaterResolveProxy, updateTag, advisoryUrl });
-            if (doctorFix) {
-                // AaaS fork: --fix writes dsh profile manifests/lockfiles; refused (read-only audit only).
-                console.error("bili doctor --fix: removed in the AaaS fork (read-only audit only). See docs/AAAS-FORK.md.");
-                process.exit(2);
-            }
-            if (doctorFix) {
-                // #3496: explicit repair pass — the read-only audit above stays
-                // read-only; --fix is the only thing that writes dsh-profile
-                // ledgers, and it prints every change it makes.
-                const fixes = fixDshLedgers();
-                report.ledgerFixes = fixes;
-                process.stdout.write(doctorJson ? JSON.stringify(report, null, 2) + "\n" : renderDoctorReport(report) + "\n" + renderLedgerFixReport(fixes));
-                if (fixes.some((f) => f.error !== undefined || f.residualFindings.length > 0)) process.exitCode = 1;
-            } else {
-                process.stdout.write(doctorJson ? JSON.stringify(report, null, 2) + "\n" : renderDoctorReport(report));
-            }
+            process.stdout.write(doctorJson ? JSON.stringify(report, null, 2) + "\n" : renderDoctorReport(report));
         } catch (error) {
             console.error(`bili doctor: ${error instanceof Error ? error.message : String(error)}`);
             process.exit(1);

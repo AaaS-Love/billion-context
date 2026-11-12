@@ -17,11 +17,11 @@
 FROM node:24-slim AS build
 WORKDIR /src
 COPY . .
-RUN npm ci --no-audit --no-fund && npm run build && npm pack --pack-destination /out
+RUN npm ci --no-audit --no-fund --ignore-scripts && npm --prefix kernel ci --no-audit --no-fund --ignore-scripts && npm --prefix pi-subagents ci --no-audit --no-fund --ignore-scripts && npm run build && npm pack --ignore-scripts --pack-destination /out
 
 FROM node:24-slim
 COPY --from=build /out/*.tgz /tmp/
-RUN npm install -g --no-audit --no-fund /tmp/*.tgz && rm -f /tmp/*.tgz
+RUN npm install -g --no-audit --no-fund --ignore-scripts /tmp/*.tgz && rm -f /tmp/*.tgz
 
 ENV ACP_AUTO_UPDATE=0
 
