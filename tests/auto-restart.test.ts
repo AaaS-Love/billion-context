@@ -1,20 +1,13 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import net from "node:net";
 import path from "node:path";
-import { once } from "node:events";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import type { Logger } from "../src/logger.ts";
 import { rmrf } from "./tmp-rm.ts";
-import { defaultConfig } from "acp-kernel";
-import { startServer as startBiliServer, restartForceCloseOf } from "../src/server.ts";
-import type { ProxyOptions } from "../src/config.ts";
-import { SessionStore, _setStoreForTest } from "../src/persist.ts";
-import { _setForTest as setRegistryForTest } from "../src/registry.ts";
 import { isPidAlive } from "../src/instance.ts";
 import { UPGRADE_REPLACEMENT_ENV } from "../src/listen-policy.ts";
 
@@ -75,93 +68,6 @@ async function requestOk(port: number): Promise<boolean> {
     }
 }
 
-async function healthOk(port: number): Promise<boolean> {
-    try {
-        const res = await fetch(`http://127.0.0.1:${port}/__bili/health`);
-        return res.status === 200;
-    } catch {
-        return false;
-    }
-}
-
-/** Real bili proxy with MITM enabled and an EMPTY whitelist: every CONNECT
- *  target becomes a blind TCP tunnel — the production shape behind #2895. */
-async function startBiliProxy(): Promise<{ server: http.Server; port: number }> {
-    _setStoreForTest(new SessionStore({ enabled: false }));
-    setRegistryForTest({});
-    const opts: ProxyOptions = {
-        port: 0,
-        host: "127.0.0.1",
-        upstream: "http://127.0.0.1:1",
-        routes: {},
-        proxy: "",
-        proxyMode: "direct",
-        proxySource: "direct",
-        modelContextLimit: 400_000,
-        kernelConfig: defaultConfig(400_000),
-        compress: { injectTool: true, injectNudge: true },
-        promptCache: { routing: "auto" },
-        sessionHeader: "x-acp-session",
-        log: false,
-        debug: false,
-        passthrough: false,
-        autoUpdate: false,
-        mitm: { enabled: true, domains: [] },
-        compat: { roles: {} }, streamErrorShape: "protocol", passthroughSource: null, autoRestartOnUpdate: false, updateTag: "latest", advisoryCheck: false, releaseNotesCheck: false,
-    };
-    const server = await startBiliServer(opts);
-    await once(server, "listening");
-    const addr = server.address();
-    assert.ok(addr && typeof addr === "object");
-    return { server, port: addr.port };
-}
-
-/** Loopback TCP server that accepts and HOLDS connections — a tunnel peer. */
-async function startHoldingServer(): Promise<{ port: number; close: () => Promise<void> }> {
-    const held: net.Socket[] = [];
-    const server = net.createServer((sock) => {
-        sock.on("error", () => {});
-        held.push(sock);
-    });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const addr = server.address();
-    assert.ok(addr && typeof addr === "object");
-    const port = addr.port;
-    const close = async () => {
-        for (const s of held) s.destroy();
-        await new Promise<void>((r) => server.close(() => r()));
-    };
-    return { port, close };
-}
-
-/** Raw client: opens a CONNECT tunnel through the proxy toward the holding
- *  server and resolves once "200 Connection Established" arrives. */
-function openConnectTunnel(proxyPort: number, targetPort: number): Promise<net.Socket> {
-    return new Promise((resolve, reject) => {
-        const sock = net.connect(proxyPort, "127.0.0.1", () => {
-            sock.write(`CONNECT 127.0.0.1:${targetPort} HTTP/1.1\r\nHost: 127.0.0.1:${targetPort}\r\n\r\n`);
-        });
-        const timer = setTimeout(() => {
-            sock.destroy();
-            reject(new Error("CONNECT timed out"));
-        }, 5000);
-        sock.once("data", (buf) => {
-            clearTimeout(timer);
-            const statusLine = buf.toString("latin1").split("\r\n")[0] ?? "";
-            if (/^HTTP\/1\.1 200/.test(statusLine)) resolve(sock);
-            else reject(new Error(`unexpected CONNECT response: ${statusLine}`));
-        });
-        sock.once("error", (err) => {
-            clearTimeout(timer);
-            reject(err);
-        });
-    });
-}
-
-async function clearRestartMarker(): Promise<void> {
-    const { rm } = await import("node:fs/promises");
-    await rm(path.join(process.env.XDG_CACHE_HOME ?? "", "billion-context", ".auto-restart"), { force: true });
-}
 
 /** Stub replacement: serves real HTTP on argv[2] and stays up until killed.
  *  A bare TCP accept is not enough: the readiness probe passes but every
@@ -373,84 +279,7 @@ test("performSelfRestart: handover succeeds at zero in-flight", { timeout: 30_00
     }
 });
 
-// #2895: CONNECT tunnels leave HTTP-parser tracking (claimed by the 'connect'
-// handler) yet still count against the net.Server connection count, so
-// closeAllConnections() alone can never fire the close callback while a tunnel
-// is held open — under HTTPS_PROXY/MITM setups (long-lived telemetry pools,
-// keep-alive clients) the forced-close grace always expired and every
-// auto-restart aborted with "connections stuck". The first test below pins the
-// failure WITHOUT the hook; the second proves the wired hook fixes it.
-test("performSelfRestart: held CONNECT tunnel blocks closeAllConnections (#2895 repro)", { timeout: 30_000 }, async () => {
-    const holding = await startHoldingServer();
-    const { server, port } = await startBiliProxy();
-    const { log, entries } = makeLog();
-    const record: SpawnRecord = {};
-    await clearRestartMarker();
-    const tunnel = await openConnectTunnel(port, holding.port);
-    try {
-        const result = await performSelfRestart({
-            server, host: "127.0.0.1", port,
-            installDir: makeInstall("1.0.1"),
-            runningVersion: "1.0.0", diskVersion: "1.0.1",
-            log, inFlightProvider: () => 0,
-            spawnImpl: makeSpawn(makeReadyStub("stub-stuck.mjs"), port, record),
-            settleMs: 500, readyTimeoutMs: 5000,
-            finish: () => assert.fail("must not finish while a tunnel holds the listener"),
-        });
-        assert.equal(result.ok, false, JSON.stringify(result));
-        assert.equal(result.error, "connections-stuck");
-        assert.equal(record.child, undefined, "no replacement may be spawned");
-        assert.equal(await readLastRestart(), undefined, "aborted attempts must not burn the cooldown");
-        assert.equal(server.listening, true, "listener must be resumed after abort");
-        assert.equal(await healthOk(port), true, "resumed listener must serve");
-        assert.match(entries.join("\n"), /connections stuck after forced close/s);
-    } finally {
-        record.child?.kill();
-        tunnel.destroy();
-        server.closeAllConnections?.();
-        await new Promise<void>((r) => server.close(() => r()));
-        await holding.close();
-    }
-});
-
-test("performSelfRestart: lingering-socket hook force-closes tunnels and hands over (#2895 fix)", { timeout: 30_000 }, async () => {
-    const holding = await startHoldingServer();
-    const { server, port } = await startBiliProxy();
-    const { log, entries } = makeLog();
-    const record: SpawnRecord = {};
-    let finished = 0;
-    await clearRestartMarker();
-    assert.equal(typeof restartForceCloseOf(server), "function", "bili server must expose the force-close hook");
-    const tunnel = await openConnectTunnel(port, holding.port);
-    let tunnelClosed = false;
-    tunnel.once("close", () => { tunnelClosed = true; });
-    try {
-        const result = await performSelfRestart({
-            server, host: "127.0.0.1", port,
-            installDir: makeInstall("1.0.1"),
-            runningVersion: "1.0.0", diskVersion: "1.0.1",
-            log, inFlightProvider: () => 0,
-            destroyLingeringSockets: restartForceCloseOf(server),
-            spawnImpl: makeSpawn(makeReadyStub("stub-tunnel.mjs"), port, record),
-            settleMs: 500, readyTimeoutMs: 5000,
-            finish: () => { finished++; },
-        });
-        assert.equal(result.ok, true, JSON.stringify(result));
-        assert.ok(record.child?.pid, "replacement pid reported");
-        assert.equal(finished, 1, "finish seam called exactly once");
-        assert.equal(server.listening, false, "original listener stopped");
-        assert.equal(tunnelClosed, true, "held-open CONNECT tunnel must have been destroyed");
-        assert.match(entries.join("\n"), /force-closed \d+ lingering socket\(s\)/);
-        assert.ok(await readLastRestart(), "point-of-no-return marker written");
-        assert.equal(await healthOk(port), true, "replacement now owns the port");
-    } finally {
-        record.child?.kill();
-        tunnel.destroy();
-        server.closeAllConnections?.();
-        await new Promise<void>((r) => server.close(() => r()));
-        await holding.close();
-    }
-});
+// AaaS fork: CONNECT tunnelling (MITM) is removed, so the #2895 tunnel tests were deleted.
 
 // #2095 wiring guard: the options-matrix test above pins selfRestartSpawnOptions
 // in isolation; this proves performSelfRestart actually hands THAT output (for

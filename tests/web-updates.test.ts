@@ -215,66 +215,8 @@ function stubRegistryFetch(state: RegistryStubState): () => void {
     return () => { globalThis.fetch = prev; };
 }
 
-test("web panel Check now is check-only: gate ladder runs, nothing downloads or installs (#4791)", async () => {
-    const fixture = makeFixture("0.9.300");
-    const state: RegistryStubState = { latest: "0.9.400", tarballs: new Map([["0.9.400", makeNpmTgz("0.9.400")]]), hits: {} };
-    const restore = stubRegistryFetch(state);
-    try {
-        ua._resetUpdateActionsForTest();
-        // autoUpdate:false is exactly the reported setup — the old force=true
-        // wiring sailed past every gate and installed anyway.
-        ua.registerUpdateActions({ packageName: "billion-context", currentVersion: VERSION, autoUpdate: false, installDir: fixture });
-        const r = await ua.triggerManualCheck();
-        assert.equal(r.ok, true);
-        assert.equal(r.status, "update-available");
-        assert.equal(r.latest, "0.9.400");
-        assert.equal(r.candidate, "0.9.400");
-        assert.equal(state.hits["tarball:0.9.400"] ?? 0, 0, "check-only must never fetch the tarball");
-        assert.equal(await readDiskVersion(fixture), "0.9.300", "check-only must never install — on-disk version untouched");
-        assert.ok(await lastUpdateCheckTime(), "the last-checked marker still refreshes — that is what the button promises");
-    } finally {
-        restore();
-        ua._resetUpdateActionsForTest();
-    }
-});
 
-test("web panel Check now reports an advisory-blocked version instead of installing it (#4791/#1588)", async () => {
-    const fixture = makeFixture("0.9.300");
-    const state: RegistryStubState = { latest: "0.9.400", tarballs: new Map([["0.9.400", makeNpmTgz("0.9.400")]]), hits: {} };
-    const restore = stubRegistryFetch(state);
-    try {
-        ua._resetUpdateActionsForTest();
-        ua.registerUpdateActions({ packageName: "billion-context", currentVersion: VERSION, autoUpdate: false, installDir: fixture, advisoryBlocksVersion: (v) => v === "0.9.400" });
-        const r = await ua.triggerManualCheck();
-        assert.equal(r.ok, true);
-        assert.equal(r.status, "blocked-advisory");
-        assert.equal(r.latest, "0.9.400");
-        assert.equal(state.hits["tarball:0.9.400"] ?? 0, 0);
-        assert.equal(await readDiskVersion(fixture), "0.9.300");
-    } finally {
-        restore();
-        ua._resetUpdateActionsForTest();
-    }
-});
 
-test("web panel Check now reports up-to-date when dist-tag equals the on-disk version (#4791)", async () => {
-    const fixture = makeFixture("0.9.400");
-    const state: RegistryStubState = { latest: "0.9.400", tarballs: new Map([["0.9.400", makeNpmTgz("0.9.400")]]), hits: {} };
-    const restore = stubRegistryFetch(state);
-    try {
-        ua._resetUpdateActionsForTest();
-        ua.registerUpdateActions({ packageName: "billion-context", currentVersion: VERSION, autoUpdate: false, installDir: fixture });
-        const r = await ua.triggerManualCheck();
-        assert.equal(r.ok, true);
-        assert.equal(r.status, "up-to-date");
-        assert.equal(r.latest, "0.9.400");
-        assert.equal(state.hits["tarball:0.9.400"] ?? 0, 0);
-        assert.equal(await readDiskVersion(fixture), "0.9.400");
-    } finally {
-        restore();
-        ua._resetUpdateActionsForTest();
-    }
-});
 
 test("web panel Check now defers to an active advisory without racing it (#4791/#1481)", async () => {
     const fixture = makeFixture("0.9.300");
@@ -293,29 +235,6 @@ test("web panel Check now defers to an active advisory without racing it (#4791/
     }
 });
 
-test("panel installs attribute manual-web; advisory callers keep the legacy label (#4791)", async () => {
-    const fixture = makeFixture("0.9.300");
-    const state: RegistryStubState = { latest: "0.9.400", tarballs: new Map([["0.9.400", makeNpmTgz("0.9.400")]]), hits: {} };
-    const restore = stubRegistryFetch(state);
-    await _resetLastInstallForTest();
-    try {
-        const opts = { packageName: "billion-context", currentVersion: "0.9.300", autoUpdate: false, installDir: fixture };
-        const panel = await forceInstallVersion("0.9.400", fixture, opts, "web-panel", "manual-web");
-        assert.equal(panel.ok, true);
-        const rec = await getLastInstall();
-        assert.equal(rec?.source, "manual-web", "a user-initiated panel install must not be misfiled under an advisory id");
-        assert.equal(rec?.version, "0.9.400");
-        assert.equal(await readDiskVersion(fixture), "0.9.400");
-        await _resetLastInstallForTest();
-        const fixture2 = makeFixture("0.9.300");
-        const adv = await forceInstallVersion("0.9.400", fixture2, { ...opts, installDir: fixture2 }, "adv-test");
-        assert.equal(adv.ok, true);
-        assert.equal((await getLastInstall())?.source, "advisory:adv-test", "advisory callers omitting the explicit source keep the legacy label");
-    } finally {
-        restore();
-        await _resetLastInstallForTest();
-    }
-});
 
 test("admin routes: state surfaces notices; install enforces charset/auth gates (#3719)", async () => {
     _setStoreForTest(new SessionStore({ enabled: false }));

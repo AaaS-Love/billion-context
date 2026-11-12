@@ -97,40 +97,4 @@ function makeTarball(root: string): { tgz: Buffer; integrity: string } {
     return { tgz, integrity: integrityField(tgz) };
 }
 
-test("installViaTarball: tarball fetch receives the egress dispatcher when provided", { timeout: 30_000 }, async () => {
-    const fx = makeFixture();
-    process.env.XDG_CACHE_HOME = fx.cacheDir;
-    try {
-        const { tgz, integrity } = makeTarball(fx.root);
-        const marker = { __testDispatcher: true };
-        const captures: Capture[] = [];
-        const r = await withCapturedFetch(tgz, captures, () =>
-            installViaTarball("2.0.0", "https://registry.test/x.tgz", fx.installDir, integrity, undefined, marker),
-        );
-        assert.equal(r.ok, true, r.error);
-        assert.equal(captures.length, 1);
-        assert.equal(captures[0].url, "https://registry.test/x.tgz");
-        assert.equal(captures[0].init.dispatcher, marker);
-    } finally {
-        delete process.env.XDG_CACHE_HOME;
-        rmrf(fx.root);
-    }
-});
 
-test("installViaTarball: no dispatcher on the fetch when none provided", { timeout: 30_000 }, async () => {
-    const fx = makeFixture();
-    process.env.XDG_CACHE_HOME = fx.cacheDir;
-    try {
-        const { tgz, integrity } = makeTarball(fx.root);
-        const captures: Capture[] = [];
-        const r = await withCapturedFetch(tgz, captures, () =>
-            installViaTarball("2.0.0", "https://registry.test/x.tgz", fx.installDir, integrity),
-        );
-        assert.equal(r.ok, true, r.error);
-        assert.equal(captures.length, 1);
-        assert.ok(!("dispatcher" in captures[0].init), "direct fetch must not carry a dispatcher");
-    } finally {
-        delete process.env.XDG_CACHE_HOME;
-        rmrf(fx.root);
-    }
-});

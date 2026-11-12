@@ -47,6 +47,7 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
+import { refuseEgress } from "../no-egress.js";
 import { existsSync, readFileSync } from "node:fs";
 import { promises as fsp } from "node:fs";
 import { createRequire } from "node:module";
@@ -636,10 +637,8 @@ async function fetchVerifiedTarball(url: string, expectedSha512Base64: string, t
     const dispatcher = proxyDispatcher(resolveProxy?.(url));
     // @types/node types RequestInit.dispatcher as its internal Dispatcher;
     // cast once here (no `as any`), same pattern as src/update.ts fetchWithEgress.
-    const res = await fetch(url, {
-        signal: AbortSignal.timeout(bootstrapTimeoutOverrideMs ?? BOOTSTRAP_TIMEOUT_MS),
-        ...(dispatcher ? { dispatcher } : {}),
-    } as RequestInit);
+    void dispatcher;
+    const res = refuseEgress(`sqlite engine tarball ${url}`) as never as Response; // AaaS fork: builtin node:sqlite only
     if (!res.ok || !res.body) throw new Error(`registry returned HTTP ${res.status} for ${url}`);
     const hash = createHash("sha512");
     const out = await fsp.open(tmpTgz, "w");

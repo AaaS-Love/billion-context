@@ -163,26 +163,6 @@ test("convergeDshProfileBundles: missing installDir or version is a no-op", asyn
     }
 });
 
-test("checkForUpdate: an up-to-date global still converges stale dsh profile copies (#1803)", async () => {
-    const w = makeWorld("0.1.175");
-    const calls: string[] = [];
-    const prevDshHome = process.env.DSH_HOME;
-    process.env.DSH_HOME = w.dshHome;
-    try {
-        _setDshRunnersForTest({ async: recordingAsyncRunner(w.dshHome, calls) });
-        process.env.XDG_CACHE_HOME = path.join(w.base, "cache");
-        await withRegistry("0.1.176", async () => {
-            await checkForUpdate({ packageName: "billion-context", currentVersion: "0.1.176", autoUpdate: true, installDir: w.globalDir }, true);
-        });
-        assert.deepEqual(calls, ["plugin --profile ghost add billion-context@0.1.176", "plugin --profile web add billion-context@0.1.176"]);
-    } finally {
-        _setDshRunnersForTest(undefined);
-        process.env.XDG_CACHE_HOME = path.join(root, "cache");
-        if (prevDshHome === undefined) delete process.env.DSH_HOME;
-        else process.env.DSH_HOME = prevDshHome;
-        w.cleanup();
-    }
-});
 
 test("checkForUpdate: in-step profiles spawn nothing on the up-to-date path", async () => {
     const w = makeWorld("0.1.176");

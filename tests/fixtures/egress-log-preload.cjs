@@ -1,0 +1,32 @@
+// Test-only preload: records every socket connect, DNS lookup and child process
+// of the proxy under test, so tests/aaas-local-only.test.ts can assert that no
+// destination other than loopback was ever touched.
+const fs = require("node:fs");
+const net = require("node:net");
+const dns = require("node:dns");
+const cp = require("node:child_process");
+const out = process.env.EGRESS_LOG;
+const w = (o) => { try { fs.appendFileSync(out, JSON.stringify(o) + "\n"); } catch {} };
+const origConnect = net.Socket.prototype.connect;
+net.Socket.prototype.connect = function (...a) {
+  let o = a[0];
+  if (Array.isArray(o)) o = o[0]; // fetch/net.connect hand Socket.connect a normalized [options, cb] array
+  if (o && typeof o === "object") w({ kind: "connect", host: o.host ?? "(path)", port: o.port, path: o.path });
+  else if (typeof o === "number") w({ kind: "connect", host: typeof a[1] === "string" ? a[1] : "localhost", port: o });
+  else if (typeof o === "string") w({ kind: "connect", host: "(path)", path: o });
+  return origConnect.apply(this, a);
+};
+for (const fn of ["lookup","resolve","resolve4","resolve6","resolveAny"]) {
+  const orig = dns.promises[fn];
+  if (typeof orig === "function") dns.promises[fn] = function (host, ...r) { w({ kind: "dns", host: String(host) }); return orig.call(this, host, ...r); };
+}
+for (const fn of ["resolve","resolve4","resolve6","resolveAny","resolveCname","resolveMx","resolveTxt","resolveSrv","reverse"]) {
+  const orig = dns[fn];
+  if (typeof orig === "function") dns[fn] = function (host, ...r) { w({ kind: "dns", host: String(host) }); return orig.call(this, host, ...r); };
+}
+const origLookup = dns.lookup;
+dns.lookup = function (host, ...r) { w({ kind: "dns", host }); return origLookup.call(this, host, ...r); };
+for (const fn of ["spawn", "spawnSync", "execFile", "execFileSync", "exec", "execSync"]) {
+  const orig = cp[fn];
+  cp[fn] = function (cmd, ...r) { w({ kind: "spawn", cmd: String(cmd), args: Array.isArray(r[0]) ? r[0].map(String) : [] }); return orig.call(this, cmd, ...r); };
+}

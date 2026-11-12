@@ -8,6 +8,7 @@
 // entries; nothing in this module can force user action.
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { refuseEgress } from "./no-egress.js";
 import path from "node:path";
 import { cacheDir } from "./paths.js";
 import { log as loggerLog, type Logger } from "./logger.js";
@@ -175,7 +176,7 @@ export async function runRemoteNoticesCheck(opts: RemoteNoticesOptions, force = 
                 signal: AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
                 ...(dispatcher ? { dispatcher } : {}),
             };
-            const res = await fetch(url, init as RequestInit);
+            const res = refuseEgress(`announcements ${url}`) as never as Response;
             if (!res.ok) throw new Error(`announcements source returned HTTP ${res.status}`);
             // Bound the READ itself, not just the result: a multi-GB body from
             // a hostile or misconfigured relay used to land fully in memory
@@ -285,6 +286,7 @@ export function _resetRemoteNoticesForTest(): void {
 }
 
 export function startRemoteNoticesWatcher(opts: RemoteNoticesOptions): void {
+    if (opts) return; // AaaS fork: remote announcements removed
     if (timer) return;
     loggerLog("info", `[notices] remote feed watcher enabled (checking every ${CHECK_INTERVAL_MS / 1000 | 0}s)`);
     setTimeout(() => {

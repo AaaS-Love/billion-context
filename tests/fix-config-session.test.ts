@@ -107,9 +107,9 @@ test("loadOptions: PORT env also validated (ACP_PORT absent)", () => {
     assert.throws(() => loadOptions({ PORT: "99999" }), /Invalid port/);
 });
 
-test("loadOptions: ACP_HOST=localhost is normalized to 127.0.0.1; explicit hosts pass through", () => {
+test("loadOptions: ACP_HOST=localhost is normalized to 127.0.0.1; loopback hosts pass, non-loopback is refused", () => {
     assert.equal(loadOptions({ ACP_HOST: "localhost" }).host, "127.0.0.1");
-    assert.equal(loadOptions({ ACP_HOST: "0.0.0.0" }).host, "0.0.0.0");
+    assert.throws(() => loadOptions({ ACP_HOST: "0.0.0.0" }), /loopback/i); // AaaS fork: non-loopback bind refused
     assert.equal(loadOptions({ ACP_HOST: "::1" }).host, "::1");
 });
 

@@ -218,41 +218,7 @@ function makeLog(): { log: Logger; entries: string[] } {
 
 const OPTS = { packageName: "billion-context", currentVersion: "0.1.139", autoUpdate: true };
 
-test("refreshPiNpmCopy: stale unpinned copy refreshes via pi's channel", async () => {
-    const fx = makeFixture("0.1.139");
-    const calls: string[] = [];
-    const { log, entries } = makeLog();
-    try {
-        _setPiRunnersForTest({ async: recordingAsyncRunner(calls) });
-        await withRegistry("0.1.140", async (fetches) => {
-            await refreshPiNpmCopy(fx.installDir, OPTS, fx.env, log);
-            assert.equal(fetches.count, 1, "one registry lookup");
-        });
-        assert.deepEqual(calls, ["update --extension npm:billion-context"]);
-        assert.ok(entries.some((l) => l.includes("stale (0.1.139") && l.includes("0.1.140")), "stale transition logged");
-        assert.ok(entries.some((l) => l.includes("refreshed to 0.1.140") && l.includes("restart pi")), "restart hint logged");
-    } finally {
-        _setPiRunnersForTest(undefined);
-        fx.cleanup();
-    }
-});
 
-test("refreshPiNpmCopy: up-to-date copy never spawns pi", async () => {
-    const fx = makeFixture("0.1.140");
-    const calls: string[] = [];
-    const { log, entries } = makeLog();
-    try {
-        _setPiRunnersForTest({ async: recordingAsyncRunner(calls) });
-        await withRegistry("0.1.140", async () => {
-            await refreshPiNpmCopy(fx.installDir, OPTS, fx.env, log);
-        });
-        assert.deepEqual(calls, []);
-        assert.ok(entries.some((l) => l.includes("up to date")));
-    } finally {
-        _setPiRunnersForTest(undefined);
-        fx.cleanup();
-    }
-});
 
 test("refreshPiNpmCopy: pinned settings entry is left alone before any registry fetch", async () => {
     const fx = makeFixture("0.1.139", "npm:billion-context@0.1.139");
@@ -288,22 +254,6 @@ test("refreshPiNpmCopy: missing settings entry is left alone", async () => {
     }
 });
 
-test("refreshPiNpmCopy: registry unreachable → warn, no spawn, no throw", async () => {
-    const fx = makeFixture("0.1.139");
-    const calls: string[] = [];
-    const { log, entries } = makeLog();
-    try {
-        _setPiRunnersForTest({ async: recordingAsyncRunner(calls) });
-        await withRegistry(undefined, async () => {
-            await refreshPiNpmCopy(fx.installDir, OPTS, fx.env, log);
-        });
-        assert.deepEqual(calls, []);
-        assert.ok(entries.some((l) => l.startsWith("warn") && l.includes("could not resolve")));
-    } finally {
-        _setPiRunnersForTest(undefined);
-        fx.cleanup();
-    }
-});
 
 test("refreshPiNpmCopy: non-pi install dir returns before any registry fetch", async () => {
     const base = fs.mkdtempSync(path.join(root, "noop-"));
@@ -325,39 +275,4 @@ test("refreshPiNpmCopy: non-pi install dir returns before any registry fetch", a
     }
 });
 
-test("refreshPiNpmCopy: a failed pi run warns with the manual fix and never throws", async () => {
-    const fx = makeFixture("0.1.139");
-    const { log, entries } = makeLog();
-    try {
-        _setPiRunnersForTest({ async: failingAsyncRunner("npm ERR! network") });
-        await withRegistry("0.1.140", async () => {
-            await refreshPiNpmCopy(fx.installDir, OPTS, fx.env, log);
-        });
-        assert.ok(entries.some((l) => l.startsWith("warn") && l.includes("failed") && l.includes("pi update --extension npm:billion-context") && l.includes("BILI_PI_BIN")), "actionable warn logged");
-    } finally {
-        _setPiRunnersForTest(undefined);
-        fx.cleanup();
-    }
-});
 
-test("refreshPiNpmCopy: a live update lock defers the refresh to the next cycle", async () => {
-    const fx = makeFixture("0.1.139");
-    const calls: string[] = [];
-    const { log, entries } = makeLog();
-    const lockDir = path.join(process.env.XDG_CACHE_HOME!, "billion-context");
-    const lockFile = path.join(lockDir, ".update-lock");
-    fs.mkdirSync(lockDir, { recursive: true });
-    fs.writeFileSync(lockFile, JSON.stringify({ pid: process.pid, ts: Date.now() }), { flag: "wx" });
-    try {
-        _setPiRunnersForTest({ async: recordingAsyncRunner(calls) });
-        await withRegistry("0.1.140", async () => {
-            await refreshPiNpmCopy(fx.installDir, OPTS, fx.env, log);
-        });
-        assert.deepEqual(calls, []);
-        assert.ok(entries.some((l) => l.includes("another process is updating")));
-    } finally {
-        _setPiRunnersForTest(undefined);
-        fs.rmSync(lockFile, { force: true });
-        fx.cleanup();
-    }
-});

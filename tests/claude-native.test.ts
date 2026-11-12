@@ -1180,42 +1180,21 @@ test("install with an explicit port bakes it; without env the hook rides the zon
     }
 });
 
-test("repinClaudeManagedBaseUrl: follows a drifted origin, preserves the relay, never touches a foreign URL (#1660)", () => {
+test("repinClaudeManagedBaseUrl: AaaS fork never writes the client settings file", () => {
     const prevDir = process.env.CLAUDE_CONFIG_DIR;
     const prevCfg = process.env.BILI_CONFIG_FILE;
-    const prevUp = process.env.BILI_CLAUDE_UPSTREAM;
     const box = sandbox();
     try {
-        delete process.env.BILI_CLAUDE_UPSTREAM;
-        // A store left over from an install that baked 48787 + a custom relay.
-        fs.writeFileSync(
-            box.settings,
-            JSON.stringify({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:48787/bili/https://relay.example" } }),
-            "utf8",
-        );
+        const body = JSON.stringify({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:48787/bili/https://relay.example" } });
+        fs.writeFileSync(box.settings, body, "utf8");
         const notes = repinClaudeManagedBaseUrl("http://127.0.0.1:18788");
-        const after = JSON.parse(fs.readFileSync(box.settings, "utf8")) as { env?: Record<string, string>; hooks?: { SessionStart?: unknown } };
-        // The relay survives the repin; only the origin moves.
-        assert.equal(after.env?.ANTHROPIC_BASE_URL, "http://127.0.0.1:18788/bili/https://relay.example");
-        assert.ok(Array.isArray(after.hooks?.SessionStart), "the hook is upserted alongside");
-        assert.ok(notes.length > 0);
-
-        // Idempotent: a second repin to the same origin changes nothing and
-        // returns no notes (no write either).
-        const before = fs.readFileSync(box.settings, "utf8");
-        const again = repinClaudeManagedBaseUrl("http://127.0.0.1:18788");
-        assert.equal(again.length, 0);
-        assert.equal(fs.readFileSync(box.settings, "utf8"), before);
-
-        // A foreign base URL is never touched.
-        fs.writeFileSync(box.settings, JSON.stringify({ env: { ANTHROPIC_BASE_URL: "https://corporate-gateway.example" } }), "utf8");
+        assert.deepEqual(notes, []);
+        assert.equal(fs.readFileSync(box.settings, "utf8"), body, "settings file must stay byte-identical");
+        fs.rmSync(box.settings);
         repinClaudeManagedBaseUrl("http://127.0.0.1:18788");
-        const foreign = JSON.parse(fs.readFileSync(box.settings, "utf8")) as { env?: Record<string, string> };
-        assert.equal(foreign.env?.ANTHROPIC_BASE_URL, "https://corporate-gateway.example");
+        assert.equal(fs.existsSync(box.settings), false, "no settings file may be created");
     } finally {
         unsandbox(prevDir, prevCfg);
-        if (prevUp === undefined) delete process.env.BILI_CLAUDE_UPSTREAM;
-        else process.env.BILI_CLAUDE_UPSTREAM = prevUp;
     }
 });
 

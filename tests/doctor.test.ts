@@ -275,41 +275,6 @@ test("#2850: inspectLanePresence pi: absolute-path entry keeps local-path semant
     }
 });
 
-test("#2850: runDoctor pi npm lane verdicts off the real copy and drops the false materialize hint", async () => {
-    const base = mkdtempSync(path.join(tmpdir(), "bc-doctor-pi-run-"));
-    const piHome = path.join(base, "pi");
-    const realCopy = path.join(piHome, "npm", "node_modules", "billion-context");
-    mkdirSync(realCopy, { recursive: true });
-    writeFileSync(path.join(realCopy, "package.json"), JSON.stringify({ name: "billion-context", version: "0.1.143" }));
-    writeFileSync(path.join(piHome, "settings.json"), JSON.stringify({ packages: ["npm:billion-context"] }));
-    const registryDoc = (version: string): Response => new Response(JSON.stringify({ name: "billion-context", version }), { status: 200, headers: { "Content-Type": "application/json" } });
-    try {
-        await mockFetch(() => registryDoc("999.0.0"))(async () => {
-            await withEnv({ ...doctorSandboxEnv(base), PI_CODING_AGENT_DIR: piHome }, async () => {
-                const report = await runDoctor({ packageName: "billion-context", runningVersion: "0.1.143" });
-                const pi = report.lanes.find((l) => l.agent === "pi");
-                assert.equal(pi?.installed, true);
-                assert.equal(pi?.copyVersion, "0.1.143");
-                assert.equal(pi?.verdict, "stale");
-                assert.match(renderDoctorReport(report), /stale \(v0\.1\.143 → v999\.0\.0\)/);
-                assert.ok(!(pi?.detail ?? "").includes("materializes"), `copy exists — no false hint: ${pi?.detail}`);
-            });
-        });
-        // Copy genuinely absent → the pre-materialization hint applies again.
-        rmrf(realCopy);
-        await mockFetch(() => registryDoc("999.0.0"))(async () => {
-            await withEnv({ ...doctorSandboxEnv(base), PI_CODING_AGENT_DIR: piHome }, async () => {
-                const report = await runDoctor({ packageName: "billion-context", runningVersion: "0.1.143" });
-                const pi = report.lanes.find((l) => l.agent === "pi");
-                assert.equal(pi?.installed, true);
-                assert.match(pi?.detail ?? "", /pi materializes the npm copy on next startup/);
-            });
-        });
-    } finally {
-        rmrf(base);
-    }
-});
-
 test("inspectLanePresence hermes: baked plugin.yaml version is the freshness signal", () => {
     const base = mkdtempSync(path.join(tmpdir(), "bc-doctor-hermes-"));
     try {
@@ -394,62 +359,6 @@ test("runDoctor: corrupt lane config surfaces as a broken probe row, not absent"
     }
 });
 
-test("#2199: opencode npm lane surfaces the cache copy path + disk version and goes stale only when the registry leads", async () => {
-    const base = mkdtempSync(path.join(tmpdir(), "bc-doctor-oc-cache-"));
-    const ocCfg = path.join(base, "opencode.json");
-    writeFileSync(ocCfg, JSON.stringify({ plugin: ["billion-context"] }));
-    const cacheRoot = path.join(base, "xdg-cache", "opencode", "npm", "billion-context@latest", "1760000000000", "node_modules", "billion-context");
-    mkdirSync(cacheRoot, { recursive: true });
-    writeFileSync(path.join(cacheRoot, "package.json"), JSON.stringify({ name: "billion-context", version: "0.1.143" }));
-    const registryDoc = (version: string): Response => new Response(JSON.stringify({ name: "billion-context", version }), { status: 200, headers: { "Content-Type": "application/json" } });
-    try {
-        await mockFetch(() => registryDoc("999.0.0"))(async () => {
-            await withEnv({
-                HOME: path.join(base, "home"),
-                XDG_CONFIG_HOME: path.join(base, "xdg-config"),
-                XDG_DATA_HOME: path.join(base, "xdg-data"),
-                XDG_CACHE_HOME: path.join(base, "xdg-cache"),
-                XDG_STATE_HOME: path.join(base, "xdg-state"),
-                PI_CODING_AGENT_DIR: undefined, PI_HOME: undefined, DSH_HOME: undefined,
-                HERMES_HOME: undefined, KIMI_CODE_HOME: undefined, CODEX_HOME: undefined, CLAUDE_CONFIG_DIR: undefined,
-                OPENCODE_CONFIG: ocCfg,
-            }, async () => {
-                const presence = inspectLanePresence("opencode");
-                assert.equal(presence.form, "npm");
-                assert.equal(presence.targets[0], cacheRoot);
-                assert.equal(presence.copyVersion, "0.1.143");
-                const report = await runDoctor({ packageName: "billion-context", runningVersion: "0.1.143" });
-                const oc = report.lanes.find((l) => l.agent === "opencode");
-                assert.equal(oc?.copyVersion, "0.1.143");
-                assert.equal(oc?.verdict, "stale");
-                assert.match(oc?.detail ?? "", /cache copy \(/);
-                assert.ok((oc?.detail ?? "").includes(presence.targets[0]!), `detail must carry the actual load path: ${oc?.detail}`);
-                assert.match(oc?.detail ?? "", /reload\/restart OpenCode/);
-                assert.match(renderDoctorReport(report), /stale \(v0\.1\.143 → v999\.0\.0\)/);
-            });
-        });
-        // Same layout, registry at the same version as disk — must stay ok (no false-stale).
-        await mockFetch(() => registryDoc("0.1.143"))(async () => {
-            await withEnv({
-                HOME: path.join(base, "home"),
-                XDG_CONFIG_HOME: path.join(base, "xdg-config"),
-                XDG_DATA_HOME: path.join(base, "xdg-data"),
-                XDG_CACHE_HOME: path.join(base, "xdg-cache"),
-                XDG_STATE_HOME: path.join(base, "xdg-state"),
-                PI_CODING_AGENT_DIR: undefined, PI_HOME: undefined, DSH_HOME: undefined,
-                HERMES_HOME: undefined, KIMI_CODE_HOME: undefined, CODEX_HOME: undefined, CLAUDE_CONFIG_DIR: undefined,
-                OPENCODE_CONFIG: ocCfg,
-            }, async () => {
-                const report = await runDoctor({ packageName: "billion-context", runningVersion: "0.1.143" });
-                const oc = report.lanes.find((l) => l.agent === "opencode");
-                assert.equal(oc?.verdict, "ok");
-            });
-        });
-    } finally {
-        rmrf(base);
-    }
-});
-
 test("renderDoctorReport: lane warnings render under the lane row without touching the verdict", () => {
     const text = renderDoctorReport(syntheticReport({
         lanes: [
@@ -514,56 +423,6 @@ test("#2290: claude lane surfaces the last hook-detected routing bypass from the
     }
 });
 
-test("runDoctor: full report against a mocked registry, sandboxed homes", async () => {
-    const base = mkdtempSync(path.join(tmpdir(), "bc-doctor-run-"));
-    const urls: string[] = [];
-    const runWithFetch = mockFetch((url) => {
-        urls.push(url);
-        return new Response(JSON.stringify({ name: "billion-context", version: "999.0.0" }), { status: 200, headers: { "Content-Type": "application/json" } });
-    });
-    try {
-        await runWithFetch(async () => {
-            await withEnv({
-                HOME: path.join(base, "home"),
-                XDG_CONFIG_HOME: path.join(base, "xdg-config"),
-                XDG_DATA_HOME: path.join(base, "xdg-data"),
-                XDG_CACHE_HOME: path.join(base, "xdg-cache"),
-                XDG_STATE_HOME: path.join(base, "xdg-state"),
-                PI_CODING_AGENT_DIR: undefined,
-                PI_HOME: undefined,
-                DSH_HOME: undefined,
-                HERMES_HOME: undefined,
-                KIMI_CODE_HOME: undefined,
-                CODEX_HOME: undefined,
-                CLAUDE_CONFIG_DIR: undefined,
-                OPENCODE_CONFIG: undefined,
-            }, async () => {
-                const report = await runDoctor({ packageName: "billion-context", runningVersion: "0.1.143" });
-                assert.ok(urls.some((u) => u.includes("registry.npmjs.org/billion-context/latest")), `registry URL hit: ${urls.join(", ")}`);
-                assert.equal(report.global.registryVersion, "999.0.0");
-                assert.equal(report.global.updateTag, "latest");
-                assert.deepEqual(report.lanes.map((l) => l.agent).sort(), [...PLUGIN_AGENTS].sort());
-                for (const lane of report.lanes) {
-                    assert.equal(lane.installed, false, `${lane.agent} should be absent in an empty sandbox`);
-                    assert.equal(lane.verdict, "absent");
-                    assert.equal(lane.registryVersion, "999.0.0");
-                }
-                assert.deepEqual(report.processes, []);
-                if (report.global.form === "checkout") {
-                    assert.equal(report.global.verdict, "frozen");
-                } else {
-                    assert.ok(["ok", "stale"].includes(report.global.verdict));
-                }
-                const parsed = JSON.parse(JSON.stringify(report, null, 2)) as DoctorReport;
-                assert.equal(parsed.global.registryVersion, "999.0.0");
-                assert.ok(renderDoctorReport(parsed).includes("bili doctor"));
-            });
-        });
-    } finally {
-        rmrf(base);
-    }
-});
-
 test("runDoctor: unreachable registry never produces a false-stale verdict", async () => {
     const base = mkdtempSync(path.join(tmpdir(), "bc-doctor-run-"));
     const runWithFetch = mockFetch(() => Promise.reject(new Error("ENOTFOUND")));
@@ -615,58 +474,3 @@ function doctorSandboxEnv(base: string): Record<string, string | undefined> {
     };
 }
 
-test("#1577: bili doctor reports an active advisory against the on-disk version", async () => {
-    const base = mkdtempSync(path.join(tmpdir(), "bc-doctor-adv-"));
-    const advDoc = advisoryDocFor([{ id: "bc-2026-001", affected: ">=0.0.0", target: "99.0.0", reason: "corrupts tool-call arguments" }]);
-    const runWithFetch = mockFetch((url) =>
-        url.includes("bc-advisories.json")
-            ? new Response(JSON.stringify(advDoc))
-            : new Response(JSON.stringify({ name: "billion-context", version: "999.0.0" }), { status: 200, headers: { "content-type": "application/json" } }),
-    );
-    try {
-        await runWithFetch(async () => {
-            await withEnv(doctorSandboxEnv(base), async () => {
-                const report = await runDoctor({ packageName: "billion-context", runningVersion: "0.1.143", advisoryUrl: ADVISORY_URL });
-                assert.equal(report.global.advisory?.error, undefined);
-                assert.equal(report.global.advisory?.active?.id, "bc-2026-001");
-                assert.equal(report.global.advisory?.active?.currentVersion, report.global.diskVersion ?? "0.1.143");
-                const text = renderDoctorReport(report);
-                assert.match(text, /advisory      ⚠️ \[bc-2026-001\] .*corrupts tool-call arguments/);
-                assert.ok(text.includes("npm install -g billion-context@99.0.0"));
-            });
-        });
-    } finally {
-        rmrf(base);
-    }
-});
-
-test("#1577: bili doctor reports a clean advisory state as 'none' and a failed source as unknown", async () => {
-    const base = mkdtempSync(path.join(tmpdir(), "bc-doctor-adv-none-"));
-    const cleanDoc = advisoryDocFor([]);
-    const runClean = mockFetch((url) =>
-        url.includes("bc-advisories.json")
-            ? new Response(JSON.stringify(cleanDoc))
-            : new Response(JSON.stringify({ name: "billion-context", version: "999.0.0" }), { status: 200, headers: { "content-type": "application/json" } }),
-    );
-    try {
-        await runClean(async () => {
-            await withEnv(doctorSandboxEnv(base), async () => {
-                const report = await runDoctor({ packageName: "billion-context", runningVersion: "0.1.143", advisoryUrl: ADVISORY_URL });
-                assert.equal(report.global.advisory?.active, undefined);
-                assert.equal(report.global.advisory?.error, undefined);
-                assert.match(renderDoctorReport(report), /advisory      none/);
-            });
-        });
-        const runFail = mockFetch(() => Promise.reject(new Error("ENOTFOUND")));
-        await runFail(async () => {
-            await withEnv(doctorSandboxEnv(base), async () => {
-                const report = await runDoctor({ packageName: "billion-context", runningVersion: "0.1.143", advisoryUrl: ADVISORY_URL });
-                assert.equal(report.global.advisory?.active, undefined);
-                assert.match(report.global.advisory?.error ?? "", /ENOTFOUND|fetch/i);
-                assert.match(renderDoctorReport(report), /advisory      check failed .*— status unknown/);
-            });
-        });
-    } finally {
-        rmrf(base);
-    }
-});

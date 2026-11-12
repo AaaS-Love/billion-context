@@ -21,6 +21,7 @@
  * cycle automatically.
  */
 import { readFile, writeFile, mkdir, access, constants, rm, cp, unlink, lstat, stat, rename, mkdtemp, readdir } from "node:fs/promises";
+import { refuseEgress } from "./no-egress.js";
 import { execFile, spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import crypto from "node:crypto";
@@ -1118,7 +1119,7 @@ export function egressDispatcher(opts: Pick<UpdateOptions, "resolveProxy">, url:
 // interface, which structurally conflicts with undici's ProxyAgent; at runtime
 // they're the same thing. Cast once here (no `as any`), as fetch-util does.
 function fetchWithEgress(url: string, init: FetchOptions): Promise<Response> {
-    return fetch(url, init as RequestInit);
+    return refuseEgress(`update fetch ${url}`);
 }
 
 /** Resolve the current version of `packageName` on the configured dist-tag
@@ -2288,6 +2289,7 @@ export async function forceInstallVersion(
 }
 
 export function startAutoUpdate(opts: UpdateOptions): void {
+    if (opts) return; // AaaS fork: auto-update removed
     // First check after a short delay (don't block startup / don't race the
     // listening socket).
     loggerLog("info", `[update] auto-update enabled (checking every ${CHECK_INTERVAL_MS / 1000 | 0}s)`);
