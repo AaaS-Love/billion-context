@@ -20,6 +20,10 @@ for (const fn of ["lookup","resolve","resolve4","resolve6","resolveAny"]) {
   const orig = dns.promises[fn];
   if (typeof orig === "function") dns.promises[fn] = function (host, ...r) { w({ kind: "dns", host: String(host) }); return orig.call(this, host, ...r); };
 }
+for (const fn of ["resolve","resolve4","resolve6","resolveAny","resolveCname","resolveMx","resolveTxt","resolveSrv","reverse"]) {
+  const orig = dns[fn];
+  if (typeof orig === "function") dns[fn] = function (host, ...r) { w({ kind: "dns", host: String(host) }); return orig.call(this, host, ...r); };
+}
 const origLookup = dns.lookup;
 dns.lookup = function (host, ...r) { w({ kind: "dns", host }); return origLookup.call(this, host, ...r); };
 for (const fn of ["spawn", "spawnSync", "execFile", "execFileSync", "exec", "execSync"]) {
