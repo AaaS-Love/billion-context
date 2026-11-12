@@ -60,13 +60,23 @@ test("runtime makes no outbound connection except the configured upstream", asyn
         upstream.close();
     }
     const events = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
-    assert.ok(events.some((e) => e.kind === "connect"), "preload recorded nothing (the check would be blind)");
+    assert.ok(events.some((e) => e.kind === "connect" && LOOPBACK.has(e.host) && Number(e.port) === upPort), `preload never saw the upstream connect (blind check): ${JSON.stringify(events.slice(0, 8))}`);
     const badConnect = events.filter((e) => e.kind === "connect" && e.host && e.host !== "(path)" && !LOOPBACK.has(e.host));
     const badDns = events.filter((e) => e.kind === "dns" && !LOOPBACK.has(e.host));
     const badSpawn = events.filter((e) => e.kind === "spawn" && /\b(npm|npx|pnpm|git|curl|wget)\b/i.test(`${e.cmd} ${(e.args ?? []).join(" ")}`));
     assert.deepEqual(badConnect, [], "non-loopback connects");
     assert.deepEqual(badDns, [], "non-loopback DNS lookups");
     assert.deepEqual(badSpawn, [], "package-manager / network tool spawns");
+});
+
+test("egress preload sees a foreign fetch and foreign DNS (the check is not blind)", async () => {
+    const home = freshHome();
+    const log = join(home, "probe.jsonl");
+    const code = "fetch('http://192.0.2.1:8080/',{signal:AbortSignal.timeout(1500)}).catch(()=>{});require('node:dns').promises.lookup('example.invalid').catch(()=>{});setTimeout(()=>{},2500)";
+    spawnSync(process.execPath, ["--require", PRELOAD, "-e", code], { env: envFor(home, { EGRESS_LOG: log }), timeout: 15_000 });
+    const events = existsSync(log) ? readFileSync(log, "utf8").trim().split(String.fromCharCode(10)).filter(Boolean).map((l) => JSON.parse(l)) : [];
+    assert.ok(events.some((e) => e.kind === "connect" && e.host === "192.0.2.1"), `foreign connect not recorded: ${JSON.stringify(events)}`);
+    assert.ok(events.some((e) => e.kind === "dns" && e.host === "example.invalid"), "foreign promises.lookup not recorded");
 });
 
 test("refuses to bind a non-loopback host", () => {

@@ -800,6 +800,11 @@ export async function main(): Promise<void> {
         try {
             const report = await runDoctor({ packageName: PACKAGE_NAME, runningVersion: VERSION, resolveProxy: updaterResolveProxy, updateTag, advisoryUrl });
             if (doctorFix) {
+                // AaaS fork: --fix writes dsh profile manifests/lockfiles; refused (read-only audit only).
+                console.error("bili doctor --fix: removed in the AaaS fork (read-only audit only). See docs/AAAS-FORK.md.");
+                process.exit(2);
+            }
+            if (doctorFix) {
                 // #3496: explicit repair pass — the read-only audit above stays
                 // read-only; --fix is the only thing that writes dsh-profile
                 // ledgers, and it prints every change it makes.

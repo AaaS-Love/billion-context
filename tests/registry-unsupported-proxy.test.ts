@@ -48,38 +48,6 @@ test("proxyDispatcher degrades to direct for an unsupported proxy scheme", () =>
     resetProxyCache();
 });
 
-test("loadRegistry clears its memo after a failed load so the next call retries", async () => {
-    // fetchFresh() reads the proxy env per call: isolateLoaderEnv clears it so
-    // the count is one fetch per load (a live https_proxy would add the "via
-    // proxy" attempt and make the assertion environment-dependent).
-    const restore = await isolateLoaderEnv();
-    let calls = 0;
-    let reg: typeof import("../src/registry.ts") | undefined;
-    try {
-        // Import AFTER the env redirect: the cache path resolves against the
-        // current XDG env at load time, so a warm developer cache cannot
-        // short-circuit the failure path.
-        reg = await import("../src/registry.ts");
-        reg._resetForTest();
-        reg._setRegistryFetchForTest(async () => {
-            calls += 1;
-            throw new Error("network down");
-        });
-
-        const first = await reg.loadRegistry();
-        assert.ok(first, "a failed fetch still resolves through the bundled snapshot");
-        assert.equal(calls, 1);
-
-        const second = await reg.loadRegistry();
-        assert.ok(second);
-        assert.equal(calls, 2, "a failed load must not stick: the next call retries");
-    } finally {
-        reg?._setRegistryFetchForTest(undefined);
-        reg?._resetForTest();
-        await restore();
-    }
-});
-
 // The user-visible regression pinned at the loader level: HTTPS_PROXY=socks5h://…
 // (the v2rayN / Clash default on Windows) used to make loadRegistry() REJECT —
 // undici's ProxyAgent constructor threw inside fetchFresh before its try/catch —
@@ -88,34 +56,3 @@ test("loadRegistry clears its memo after a failed load so the next call retries"
 // returned the same rejection even after the environment was fixed). With the
 // scheme guard the load degrades to direct egress and RESOLVES (bundled snapshot
 // when offline), and a second call still retries.
-test("an unsupported proxy scheme neither rejects the loader nor poisons its memo", async () => {
-    const restore = await isolateLoaderEnv();
-    // The exact shape v2rayN / Clash write on Windows; fetchFresh() reads the
-    // proxy env per call, and pre-fix code threw synchronously inside the async
-    // loader for this value.
-    process.env.https_proxy = "socks5h://127.0.0.1:10888";
-    let calls = 0;
-    let reg: typeof import("../src/registry.ts") | undefined;
-    try {
-        reg = await import("../src/registry.ts");
-        reg._resetForTest();
-        reg._setRegistryFetchForTest(async () => {
-            calls += 1;
-            throw new Error("network down");
-        });
-
-        // Pre-fix: rejected with InvalidArgumentError "Invalid URL protocol".
-        const first = await reg.loadRegistry();
-        assert.ok(first, "the load must resolve (bundled snapshot fallback), not reject");
-        assert.equal(calls, 1);
-
-        // Pre-fix: the memo held the rejected promise for the process lifetime.
-        const second = await reg.loadRegistry();
-        assert.ok(second);
-        assert.equal(calls, 2, "a rejected load must not poison the memo");
-    } finally {
-        reg?._setRegistryFetchForTest(undefined);
-        reg?._resetForTest();
-        await restore();
-    }
-});

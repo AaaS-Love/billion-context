@@ -612,23 +612,9 @@ export function claudeInstallUpstream(existingBaseUrl: unknown, env: NodeJS.Proc
  *  install). Also upserts the SessionStart hook, keeping a stale command
  *  fresh across upgrades. Returns the change notes for the hook's log;
  *  never throws, and writes only when the file actually changes. */
-export function repinClaudeManagedBaseUrl(origin: string, env: NodeJS.ProcessEnv = process.env): string[] {
-    const file = claudeSettingsFile(env);
-    const settings = readJson(file);
-    const cur = (settings.env as Record<string, unknown> | undefined)?.ANTHROPIC_BASE_URL;
-    const baseUrl = claudeNativeBaseUrlForOrigin(origin, typeof cur === "string" ? unwrapBiliBaseUrl(cur) : undefined, env);
-    // Drift repair covers the Vertex variable too: the block's port drifts the same
-    // way, and under CLAUDE_CODE_USE_VERTEX=1 that is the variable the client reads.
-    const vertexBaseUrl = claudeNativeVertexBaseUrl(origin, env);
-    // #1902: bare `node`, PATH-resolved by whichever client shell runs the hook.
-    const hookCommand = portableHookCommand("node", [path.join(selfPackageRoot(), "dist", "claude-native-bootstrap.js")]);
-    // #5095: repin may run from an older dist tree mid-upgrade; never bake a
-    // command pointing at a file that is not there.
-    const subagentHookJs = path.join(selfPackageRoot(), "dist", "claude-subagent-hook.js");
-    const subagentHookCommand = fs.existsSync(subagentHookJs) ? portableHookCommand("node", [subagentHookJs]) : undefined;
-    const { data, notes } = applyClaudeManagedBlock(settings, { baseUrl, hookCommand, ...(subagentHookCommand !== undefined ? { subagentHookCommand } : {}), ...(vertexBaseUrl !== undefined ? { vertexBaseUrl } : {}) });
-    if (JSON.stringify(data) !== JSON.stringify(settings)) writeJson(file, data);
-    return notes;
+export function repinClaudeManagedBaseUrl(_origin: string, _env: NodeJS.ProcessEnv = process.env): string[] {
+    // AaaS fork: never writes a client's settings (no ANTHROPIC_BASE_URL pin, no SessionStart hook).
+    return [];
 }
 
 /** #1821: the live origin of the managed block — the port the last SessionStart

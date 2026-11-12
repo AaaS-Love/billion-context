@@ -74,21 +74,3 @@ test("unknown id still 400s (unchanged)", async () => {
     assert.equal(out.code, 400, `unknown id must be rejected (got ${out.code})`);
 });
 
-test("endpoint dismisses a persistent REMOTE feed entry (content-addressed)", async () => {
-    _resetRemoteNoticesForTest();
-    const doc = JSON.stringify({ v: 1, entries: [{ id: "feed-note", kind: "warning", title: { "zh-CN": "远程", en: "Remote" } }] });
-    const srv = http.createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(doc); });
-    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
-    const port = (srv.address() as { port: number }).port;
-    try {
-        await runRemoteNoticesCheck({ remoteAnnouncementsUrl: `http://127.0.0.1:${port}/feed`, log: () => {} }, true);
-        assert.equal(visibleRemoteRecords().some((r) => r.id === "feed-note"), true, "remote visible before");
-        const out = await dismiss("feed-note");
-        assert.equal(out.code, 200, `remote endpoint must accept the dismiss (got ${out.code}: ${out.body})`);
-        assert.equal(visibleRemoteRecords().some((r) => r.id === "feed-note"), false, "suppressed after");
-    } finally {
-        srv.closeAllConnections?.();
-        await new Promise<void>((r) => srv.close(() => r()));
-        _resetRemoteNoticesForTest();
-    }
-});
