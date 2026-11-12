@@ -1,0 +1,49 @@
+name: docker-build
+
+# runner: heavy because it builds a container image (npm ci for three packages, a bundle build, npm pack, docker build).
+# AaaS-Love fork: proves the Dockerfile builds this checkout and that the container serves /__bili/health on loopback.
+
+on:
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "package.json"
+      - "package-lock.json"
+      - "kernel/package-lock.json"
+      - "pi-subagents/package-lock.json"
+      - ".github/workflows/docker-build.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: docker-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: [self-hosted, hetzner]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image from this checkout
+        run: docker build -t billion-context-local:ci .
+      - name: The installed package is the fork (no npm registry copy)
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint bili billion-context-local:ci --help | head -3
+          docker run --rm --entrypoint bili billion-context-local:ci doctor --fix && exit 1 || test $? -eq 2
+      - name: The container serves health on loopback and refuses 0.0.0.0
+        run: |
+          set -euo pipefail
+          if docker run --rm --entrypoint bili billion-context-local:ci start --host 0.0.0.0 --port 8787; then echo "0.0.0.0 bind was accepted"; exit 1; fi
+          docker run -d --name bili-ci --network host billion-context-local:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8787/__bili/health; then ok=1; break; fi
+            sleep 2
+          done
+          docker logs bili-ci | tail -20
+          docker rm -f bili-ci >/dev/null
+          test "${ok:-0}" = 1
