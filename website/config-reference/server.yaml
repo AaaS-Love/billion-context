@@ -404,14 +404,15 @@ entries:
     default: "true"
     env: BILI_DSH_CONTEXT_TAB
     group: behavior
-    desc_en: "Registers the DSH top-bar 「上下文」/「Context」 conversation tab at all (#3862/#4237): false removes ONLY that tab — compression, the settings section and every other surface keep working. Hiding never disables compression; the ledger stays reachable via the settings section (会话 subpage), the plugin bundle config face, the Web UI and the /acp command. Takes effect on the next page load / dsh restart (slot registration happens at page load); default true = today's behavior unchanged."
-    desc_zh: "是否注册 DSH 顶栏「上下文」会话标签页（#3862/#4237）：false 只移除该标签页——压缩、设置页一节及其余所有入口不受影响。隐藏绝不关闭压缩；账本仍可从设置页（会话子页）、插件 bundle 配置面、Web UI 与 /acp 命令查看。下次页面加载 / dsh 重启生效（槽位注册发生在页面加载时）；默认 true = 现状不变。"
+    desc_en: "Registers the DSH top-bar conversation tab at all (#3862/#4237, default name \"billion-context\"): false removes ONLY that tab — compression, the settings section and every other surface keep working. Hiding never disables compression; the ledger stays reachable via the settings section (会话 subpage), the plugin bundle config face, the Web UI and the /acp command. Takes effect on the next page load / dsh restart (slot registration happens at page load); default true = today's behavior unchanged."
+    desc_zh: "是否注册 DSH 顶栏会话标签页（#3862/#4237，默认名 \"billion-context\"）：false 只移除该标签页——压缩、设置页一节及其余所有入口不受影响。隐藏绝不关闭压缩；账本仍可从设置页（会话子页）、插件 bundle 配置面、Web UI 与 /acp 命令查看。下次页面加载 / dsh 重启生效（槽位注册发生在页面加载时）；默认 true = 现状不变。"
   - key: dsh.contextTabLabel
     type: string
-    default: "unset (built-in 「上下文」/「Context」)"
+    default: "unset (shows \"billion-context\")"
+    default_zh: "未设置（显示 \"billion-context\"）"
     group: behavior
-    desc_en: "Custom display name for the DSH top-bar Context tab (#4237), e.g. \"压缩账本\" when another plugin (dsh-context) owns the name 「上下文」. Trimmed non-empty string wins over the built-in label; blank or absent falls back to the built-in. File-only tier (display preference, no env knob per #2030). Default unset = built-in label unchanged."
-    desc_zh: "DSH 顶栏上下文标签页的自定义显示名（#4237），例如另一插件（dsh-context）已占用「上下文」时改为\"压缩账本\"。去空白后的非空字符串优先于内置名；留空或缺省回退内置名。仅文件层（显示偏好，按 #2030 不设 env 开关）。默认缺省 = 内置名不变。"
+    desc_en: "Custom display name for the DSH top-bar conversation tab (#4237), e.g. \"压缩账本\" when another plugin occupies the name. Trimmed non-empty string wins over the default display name \"billion-context\"; blank or absent shows the default. File-only tier (display preference, no env knob per #2030)."
+    desc_zh: "DSH 顶栏会话标签页的自定义显示名（#4237），例如另一插件已占用「上下文」时改为\"压缩账本\"。去空白后的非空字符串优先于默认显示名 \"billion-context\"；留空或缺省显示默认名。仅文件层（显示偏好，按 #2030 不设 env 开关）。"
   - key: resign
     type: "scheme → { enabled?, passthrough?, credentialRef? }"
     default: "{} (armed; built-in scheme sdk-hmac-sha256)"
