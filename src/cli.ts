@@ -608,8 +608,17 @@ export function parseArgs(argv: string[]): Parsed {
     return { command, client, clientArgs, mitmDomains, overrides, exportSelector, exportOutput, exportFull, exportJsonl, registerConversationId, pluginAction, pluginAgent, pluginWithMcp, acpCacheDir, acpCacheLog, acpCacheNoLog, acpCacheSession, sessionsSub, sessionsTarget, sessionsNoVacuum, sessionsApply, sessionsRestoreTarget, storageDays, storageVacuum, storageDryRun, jsonOutput, doctorJson, doctorFix, packAction, packSpec, packProject, packForce };
 }
 
+const REMOVED_COMMANDS = new Set(["plugin", "plugin-register", "mcp", "pack", "update", "launch", "test"]);
+
 export async function main(): Promise<void> {
     const { command, client, clientArgs, mitmDomains, overrides, exportSelector, exportOutput, exportFull, exportJsonl, registerConversationId, pluginAction, pluginAgent, pluginWithMcp, acpCacheDir, acpCacheLog, acpCacheNoLog, acpCacheSession, sessionsSub, sessionsTarget, sessionsNoVacuum, sessionsApply, sessionsRestoreTarget, storageDays, storageVacuum, storageDryRun, jsonOutput, doctorJson, doctorFix, packAction, packSpec, packProject, packForce } = parseArgs(process.argv.slice(2));
+    // AaaS fork: commands that rewrite client configs/hooks, spawn clients through a
+    // TLS-intercepting proxy, or self-update are removed. Use `bili start` and point
+    // the client at http://127.0.0.1:<port>/bili/<provider> (see docs/AAAS-FORK.md).
+    if (REMOVED_COMMANDS.has(command)) {
+        console.error(`bili ${command}: removed in the AaaS fork (local-only build). See docs/AAAS-FORK.md.`);
+        process.exit(2);
+    }
     if (command === "help") {
         process.stdout.write(HELP);
         return;

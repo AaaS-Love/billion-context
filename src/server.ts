@@ -1,4 +1,5 @@
 import http from "node:http";
+import { assertLoopbackBind } from "./no-egress.js";
 import fs from "node:fs";
 import path from "node:path";
 import net from "node:net";
@@ -1182,18 +1183,7 @@ export async function startServer(opts: ProxyOptions): Promise<http.Server> {
         exposureTimer.unref?.();
     }
     setMaskHostsEnabled(opts.maskHosts ?? true);
-    if (opts.mitm.enabled) {
-        // Non-loopback bind (--host 0.0.0.0 / LAN IP) opts into serving
-        // remote clients: CONNECT is then allowed for non-loopback clients
-        // (whitelisted model hosts only — see setupMitm). Loopback binds
-        // keep the strict loopback-only CONNECT gate (#240).
-        const allowRemoteConnect = opts.host === "0.0.0.0" || opts.host === "::" || !isLoopbackAddress(opts.host);
-        // #1012: blind tunnels are client AUX traffic (MCP/web), not model
-        // egress — they resolve with the aux fallback so the launcher-forwarded
-        // user proxy (BILI_INHERITED_*) applies here and ONLY here; the model
-        // paths below keep the clean-env direct semantics (e1c6c92).
-        setupMitm(server, opts.mitm.domains, (msg) => log("info", msg), (host) => resolveProxy(opts.routes, opts.proxy, `https://${host}`, opts.auxProxyFallback ?? opts.proxyFallback), allowRemoteConnect);
-    }
+    // AaaS fork: TLS interception (setupMitm / CONNECT handling) removed.
     // Launcher mode handshake (#407): the child self-binds and retries on
     // EADDRINUSE instead of dying, reporting the real origin via the instance
     // file (launchToken match). Manual `bili start` keeps fail-fast semantics.
@@ -1566,6 +1556,7 @@ export async function startServer(opts: ProxyOptions): Promise<http.Server> {
         // double registration, MaxListenersExceededWarning on long waits).
         // Only our own callbacks ever use this event.
         server.removeAllListeners("listening");
+        assertLoopbackBind(opts.host); // AaaS fork: loopback only
         server.listen(port, opts.host, claimOrAnnounce);
     };
     attemptListen(opts.port);

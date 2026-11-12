@@ -27,6 +27,7 @@
  * a working proxy. No install side effects here — visibility only.
  */
 import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { refuseEgress } from "./no-egress.js";
 import path from "node:path";
 import semver from "semver";
 import { cacheDir } from "./paths.js";
@@ -318,7 +319,7 @@ async function runReleaseNotesCheck(opts: ReleaseNotesWatcherOptions, force = fa
                 signal: AbortSignal.timeout(5000),
                 ...(dispatcher ? { dispatcher } : {}),
             };
-            const res = await fetch(url, init as RequestInit);
+            const res = refuseEgress(`release-notes ${url}`) as never as Response;
             if (!res.ok) throw new Error(`release-notes source returned HTTP ${res.status}`);
             data = await res.json();
         } catch (e) {
@@ -348,6 +349,7 @@ async function runReleaseNotesCheck(opts: ReleaseNotesWatcherOptions, force = fa
 }
 
 export function startReleaseNotesWatcher(opts: ReleaseNotesWatcherOptions): void {
+    if (opts) return; // AaaS fork: release-notes feed removed
     if (timer) return;
     loggerLog("info", `[release-notes] watcher enabled (checking every ${CHECK_INTERVAL_MS / 1000 | 0}s, visibility only — never installs)`);
     setTimeout(() => {

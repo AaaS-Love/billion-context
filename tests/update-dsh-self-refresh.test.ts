@@ -171,57 +171,8 @@ function makeLog(): { log: Logger; entries: string[] } {
 
 const OPTS = { packageName: "billion-context", currentVersion: "0.1.139", autoUpdate: true };
 
-test("refreshDshProfileCopy: stale registry-pinned profile refreshes via dsh's channel; link: pins untouched", async () => {
-    const fx = makeFixture("0.1.139");
-    const calls: string[] = [];
-    const { log, entries } = makeLog();
-    try {
-        _setDshRunnersForTest({ async: recordingAsyncRunner(fx.dshHome, calls) });
-        await withRegistry("0.1.140", async (fetches) => {
-            await refreshDshProfileCopy(fx.installDir, OPTS, fx.env, log);
-            assert.equal(fetches.count, 1, "one registry lookup");
-        });
-        assert.deepEqual(calls, ["plugin --profile a add billion-context@0.1.140"]);
-        assert.ok(entries.some((l) => l.includes("stale (0.1.139") && l.includes("0.1.140")), "stale transition logged");
-    } finally {
-        _setDshRunnersForTest(undefined);
-        fx.cleanup();
-    }
-});
 
-test("refreshDshProfileCopy: up-to-date copy never spawns dsh", async () => {
-    const fx = makeFixture("0.1.140");
-    const calls: string[] = [];
-    const { log, entries } = makeLog();
-    try {
-        _setDshRunnersForTest({ async: recordingAsyncRunner(fx.dshHome, calls) });
-        await withRegistry("0.1.140", async () => {
-            await refreshDshProfileCopy(fx.installDir, OPTS, fx.env, log);
-        });
-        assert.deepEqual(calls, []);
-        assert.ok(entries.some((l) => l.includes("up to date")));
-    } finally {
-        _setDshRunnersForTest(undefined);
-        fx.cleanup();
-    }
-});
 
-test("refreshDshProfileCopy: registry unreachable → warn, no spawn, no throw", async () => {
-    const fx = makeFixture("0.1.139");
-    const calls: string[] = [];
-    const { log, entries } = makeLog();
-    try {
-        _setDshRunnersForTest({ async: recordingAsyncRunner(fx.dshHome, calls) });
-        await withRegistry(undefined, async () => {
-            await refreshDshProfileCopy(fx.installDir, OPTS, fx.env, log);
-        });
-        assert.deepEqual(calls, []);
-        assert.ok(entries.some((l) => l.startsWith("warn") && l.includes("could not resolve")));
-    } finally {
-        _setDshRunnersForTest(undefined);
-        fx.cleanup();
-    }
-});
 
 test("refreshDshProfileCopy: non-dsh install dir returns before any registry fetch", async () => {
     const base = fs.mkdtempSync(path.join(root, "noop-"));
@@ -243,24 +194,3 @@ test("refreshDshProfileCopy: non-dsh install dir returns before any registry fet
     }
 });
 
-test("refreshDshProfileCopy: a live update lock defers the refresh to the next cycle", async () => {
-    const fx = makeFixture("0.1.139");
-    const calls: string[] = [];
-    const { log, entries } = makeLog();
-    const lockDir = path.join(process.env.XDG_CACHE_HOME!, "billion-context");
-    const lockFile = path.join(lockDir, ".update-lock");
-    fs.mkdirSync(lockDir, { recursive: true });
-    fs.writeFileSync(lockFile, JSON.stringify({ pid: process.pid, ts: Date.now() }), { flag: "wx" });
-    try {
-        _setDshRunnersForTest({ async: recordingAsyncRunner(fx.dshHome, calls) });
-        await withRegistry("0.1.140", async () => {
-            await refreshDshProfileCopy(fx.installDir, OPTS, fx.env, log);
-        });
-        assert.deepEqual(calls, []);
-        assert.ok(entries.some((l) => l.includes("another process is updating")));
-    } finally {
-        _setDshRunnersForTest(undefined);
-        fs.rmSync(lockFile, { force: true });
-        fx.cleanup();
-    }
-});

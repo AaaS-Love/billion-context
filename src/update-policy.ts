@@ -38,6 +38,7 @@
  * defaults. The updater keeps working in every degraded state.
  */
 import { readFile, writeFile, mkdir, rename, unlink } from "node:fs/promises";
+import { refuseEgress } from "./no-egress.js";
 import path from "node:path";
 import { cacheDir } from "./paths.js";
 import { log as loggerLog, type Logger } from "./logger.js";
@@ -562,11 +563,8 @@ export async function loadUpdatePolicy(opts: {
     let res: Response;
     try {
         const dispatcher = proxyDispatcher(opts.resolveProxy?.(opts.url));
-        res = await fetch(opts.url, {
-            headers,
-            signal: AbortSignal.timeout(POLICY_FETCH_TIMEOUT_MS),
-            ...(dispatcher ? { dispatcher } : {}),
-        } as RequestInit);
+        void dispatcher;
+        res = refuseEgress(`update-policy ${opts.url}`) as never as Response;
     } catch (e) {
         return await failOpen(String(e));
     }
@@ -658,11 +656,8 @@ export async function fetchPublishedVersions(opts: {
     }
     try {
         const dispatcher = proxyDispatcher(opts.resolveProxy?.(opts.url));
-        const res = await fetch(opts.url, {
-            headers: { Accept: "application/json" },
-            signal: AbortSignal.timeout(PACKUMENT_FETCH_TIMEOUT_MS),
-            ...(dispatcher ? { dispatcher } : {}),
-        } as RequestInit);
+        void dispatcher;
+        const res = refuseEgress(`packument ${opts.url}`) as never as Response;
         if (!res.ok) return undefined;
         const data = (await res.json()) as { versions?: Record<string, unknown> };
         if (typeof data.versions !== "object" || data.versions === null) return undefined;

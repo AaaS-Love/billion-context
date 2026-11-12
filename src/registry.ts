@@ -196,6 +196,7 @@ export function _setRegistryFetchForTest(fn: RegistryFetch | undefined): void {
 }
 
 async function fetchFresh(): Promise<LoadedRegistry | null> {
+    if (REGISTRY_URL) return null; // AaaS fork: no live models.dev fetch; bundled snapshot is used
     const dispatcher = proxyDispatcher(process.env.https_proxy || process.env.HTTPS_PROXY || process.env.http_proxy || process.env.HTTP_PROXY, 15_000);
     const attempts: Array<{ opts: Parameters<typeof fetchWithTimeout>[1]; label: string }> = dispatcher
         ? [{ opts: { dispatcher }, label: "via proxy" }, { opts: {}, label: "direct" }]

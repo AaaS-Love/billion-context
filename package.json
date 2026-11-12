@@ -1,7 +1,7 @@
 {
   "name": "billion-context",
   "version": "0.1.213",
-  "description": "A context-compression plugin \u2014 small context windows (a 100K context is enough), 5x fewer tokens, month-long single sessions (billions of tokens), and compression quality \u2014 for all agents: pi, OpenCode, Codex, Claude Code, and more. billion-context is all you need.",
+  "description": "A context-compression plugin — small context windows (a 100K context is enough), 5x fewer tokens, month-long single sessions (billions of tokens), and compression quality — for all agents: pi, OpenCode, Codex, Claude Code, and more. billion-context is all you need.",
   "type": "module",
   "main": "dist/index.js",
   "exports": {
@@ -61,7 +61,7 @@
     "url": "https://github.com/ranxianglei/billion-context/issues"
   },
   "dependencies": {
-    "mysql2": "^3.15.3",
+    "mysql2": "3.15.3",
     "zod": "4.6.7"
   },
   "optionalDependencies": {
@@ -70,27 +70,27 @@
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.83.0",
     "@earendil-works/pi-tui": "0.83.0",
-    "@types/node": "^22.0.0",
-    "@types/node-forge": "^1.3.14",
-    "@types/semver": "^7.7.1",
+    "@types/node": "22.20.1",
+    "@types/node-forge": "1.3.14",
+    "@types/semver": "7.7.1",
     "@types/ws": "8.18.2",
     "acp-kernel": "file:./kernel",
     "billion-context-pi-subagents": "file:./pi-subagents",
-    "esbuild": "^0.27.0",
+    "esbuild": "0.27.7",
     "fzstd": "0.1.1",
-    "jsonc-parser": "^3.3.1",
-    "node-forge": "^1.4.0",
-    "prettier": "^3.3.0",
+    "jsonc-parser": "3.3.1",
+    "node-forge": "1.4.0",
+    "prettier": "3.9.9",
     "semver": "7.8.5",
-    "tar": "^7.5.22",
-    "tsup": "^8.0.0",
-    "tsx": "^4.0.0",
-    "typebox": "^1.3.34",
-    "typescript": "^5.5.0",
-    "undici": "^7.29.0",
-    "verdaccio": "^6.10.4",
+    "tar": "7.5.22",
+    "tsup": "8.5.1",
+    "tsx": "4.23.9",
+    "typebox": "1.3.35",
+    "typescript": "5.9.3",
+    "undici": "7.29.0",
+    "verdaccio": "6.10.4",
     "ws": "8.22.0",
-    "z3-solver": "^5.3.1"
+    "z3-solver": "5.3.1"
   },
   "engines": {
     "node": ">=20"

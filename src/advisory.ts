@@ -28,6 +28,7 @@
  *    (#806/#811) is silent for that direction.
  */
 import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { refuseEgress } from "./no-egress.js";
 import path from "node:path";
 import semver from "semver";
 import { cacheDir } from "./paths.js";
@@ -310,7 +311,7 @@ export async function runAdvisoryCheck(opts: AdvisoryWatcherOptions, force = fal
                 signal: AbortSignal.timeout(5000),
                 ...(dispatcher ? { dispatcher } : {}),
             };
-            const res = await fetch(url, init as RequestInit);
+            const res = refuseEgress(`advisory ${url}`) as never as Response;
             if (!res.ok) throw new Error(`advisory source returned HTTP ${res.status}`);
             data = await res.json();
         } catch (e) {
@@ -408,6 +409,7 @@ export async function runAdvisoryCheck(opts: AdvisoryWatcherOptions, force = fal
 }
 
 export function startAdvisoryWatcher(opts: AdvisoryWatcherOptions): void {
+    if (opts) return; // AaaS fork: advisory feed removed
     if (timer) return;
     watcherStarted = true; // #2456: open the "awaiting first check" window for the update loop's fail-safe deferral
     loggerLog("info", `[advisory] watcher enabled (checking every ${CHECK_INTERVAL_MS / 1000 | 0}s, independent of auto-update)`);
@@ -455,7 +457,7 @@ export async function evaluateAdvisories(opts: {
             signal: AbortSignal.timeout(5000),
             ...(dispatcher ? { dispatcher } : {}),
         };
-        const res = await fetch(url, init as RequestInit);
+        const res = refuseEgress(`advisory ${url}`) as never as Response;
         if (!res.ok) return { error: `advisory source returned HTTP ${res.status}` };
         data = await res.json();
     } catch (e) {

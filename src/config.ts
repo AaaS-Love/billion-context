@@ -1,4 +1,5 @@
 import { defaultConfig, DEFAULT_CCR_CONFIG, type Config, type Prompts } from "acp-kernel";
+import { assertLoopbackBind } from "./no-egress.js";
 import { parse as parseJsonc, printParseErrorCode, type ParseError } from "jsonc-parser";
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -1250,7 +1251,7 @@ function mitmTwinCovers(routes: ProviderRoutes, target: URL): boolean {
  *  which carries the same scheme-mismatch hint. */
 function warnInertMitmLaneKeys(routes: ProviderRoutes, env: NodeJS.ProcessEnv): void {
     const fileConfig = loadConfigFile();
-    const mitmEnabled = (env.BILI_MITM ?? (fileConfig.mitm?.enabled === false ? "0" : "1")) !== "0";
+    const mitmEnabled = false; // AaaS fork: MITM removed
     if (!mitmEnabled) return;
     const whitelist = [...DEFAULT_MITM_DOMAINS, ...resolveMitmDomains(env)];
     for (const key of Object.keys(routes)) {
@@ -1683,6 +1684,7 @@ export function loadOptions(env: NodeJS.ProcessEnv = process.env): ProxyOptions 
     }
     const rawHost = env.ACP_HOST ?? fileConfig.host ?? "127.0.0.1";
     const host = rawHost === "localhost" ? "127.0.0.1" : rawHost;
+    assertLoopbackBind(host); // AaaS fork: loopback only
     const upstream = (env.ACP_UPSTREAM ?? fileConfig.upstream ?? "https://api.anthropic.com").replace(/\/$/, "");
     const routes = loadRoutes(env);
     const namedProviders = loadNamedProviders(env);
@@ -1801,23 +1803,23 @@ export function loadOptions(env: NodeJS.ProcessEnv = process.env): ProxyOptions 
         dumpSse: env.ACP_DUMP_SSE || fileConfig.dumpSse || undefined,
         passthrough: passthrough.enabled,
         passthroughSource: passthrough.source,
-        autoUpdate: (env.ACP_AUTO_UPDATE ?? (fileConfig.autoUpdate === false ? "0" : "1")) !== "0",
+        autoUpdate: false, // AaaS fork: self-update removed
         // Default OFF: unlike autoUpdate, self-restart touches process
         // liveness, so it requires an explicit opt-in (#811).
         autoRestartOnUpdate: (env.ACP_AUTO_RESTART_ON_UPDATE ?? (fileConfig.autoRestartOnUpdate === true ? "1" : "0")) !== "0",
         updateTag: (env.ACP_UPDATE_TAG ?? fileConfig.updateTag ?? "latest").trim() || "latest",
         // Default ON: unlike autoRestartOnUpdate, this never touches process
         // liveness — it only installs files and warns (#1481).
-        advisoryCheck: (env.BILI_ADVISORY_CHECK ?? (fileConfig.advisoryCheck === false ? "0" : "1")) !== "0",
+        advisoryCheck: false, // AaaS fork: advisory feed removed
         // Default ON: same reasoning as advisoryCheck — pure visibility (fetch
         // + cache; never installs, never restarts) (#1870).
-        releaseNotesCheck: (env.BILI_RELEASE_NOTES_CHECK ?? (fileConfig.releaseNotesCheck === false ? "0" : "1")) !== "0",
+        releaseNotesCheck: false, // AaaS fork: release-notes feed removed
         advisoryUrl: env.BILI_ADVISORY_URL || fileConfig.advisoryUrl || undefined,
         releaseNotesUrl: env.BILI_RELEASE_NOTES_URL || fileConfig.releaseNotesUrl || undefined,
-        remoteAnnouncementsUrl: env.BILI_ANNOUNCEMENTS_URL || fileConfig.remoteAnnouncementsUrl || undefined,
+        remoteAnnouncementsUrl: undefined, // AaaS fork: remote announcements removed
         logFile: env.ACP_LOG_FILE !== undefined ? (env.ACP_LOG_FILE || undefined) : fileConfig.logFile,
         mitm: {
-            enabled: (env.BILI_MITM ?? (fileConfig.mitm?.enabled === false ? "0" : "1")) !== "0",
+            enabled: false, // AaaS fork: TLS interception (MITM) removed
             domains: dedupeDomains([
                 ...(fileConfig.mitm?.domains ?? []),
                 ...splitCsv(env.BILI_MITM_DOMAINS),
@@ -1863,7 +1865,7 @@ export function resolveMitmDomains(env: NodeJS.ProcessEnv): string[] {
  *  (#3436/#3540/#3551). */
 export function resolveRecordedMitmDomains(passed: readonly string[] | undefined, env: NodeJS.ProcessEnv = process.env): string[] {
     const fileConfig = loadConfigFile();
-    const enabled = (env.BILI_MITM ?? (fileConfig.mitm?.enabled === false ? "0" : "1")) !== "0";
+    const enabled = false; // AaaS fork: MITM removed
     if (!enabled) return [];
     const effective = passed && passed.length > 0 ? passed.join(",") : env.BILI_MITM_DOMAINS;
     return dedupeDomains([

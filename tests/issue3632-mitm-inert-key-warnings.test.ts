@@ -59,21 +59,6 @@ function captureWarnings(t: test.TestContext): string[] {
     return lines;
 }
 
-test("#3632 A1: https:// key on an explicitly whitelisted MITM host without a twin warns, naming the exact twin", (t) => {
-    const warnings = captureWarnings(t);
-    withFile(t, {
-        providers: { "https://opencode.ai": { models: { "space-bunny-free": { context: 1048576 } } } },
-        mitm: { domains: ["opencode.ai"] },
-    });
-    setEnv(t, { BILI_MITM: "1" });
-    _resetNamedProviderWarningsForTest();
-    loadRoutes();
-    assert.equal(warnings.length, 1, `expected exactly one warning, got: ${JSON.stringify(warnings)}`);
-    assert.ok(warnings[0].includes('providers."https://opencode.ai"'), warnings[0]);
-    assert.ok(warnings[0].includes("inert for MITM-lane traffic to opencode.ai"), warnings[0]);
-    assert.ok(warnings[0].includes('Add a "mitm://opencode.ai" entry'), warnings[0]);
-});
-
 test("#3632 A2: the same entry is quiet once a mitm:// twin exists", (t) => {
     const warnings = captureWarnings(t);
     withFile(t, {
@@ -89,18 +74,6 @@ test("#3632 A2: the same entry is quiet once a mitm:// twin exists", (t) => {
     assert.deepEqual(warnings, []);
 });
 
-test("#3632 A3: default-whitelisted hosts (no explicit mitm.domains needed) warn too", (t) => {
-    const warnings = captureWarnings(t);
-    withFile(t, {
-        providers: { "https://api.anthropic.com": { compress: { maxContextLimitPct: 0.75 } } },
-    });
-    setEnv(t, { BILI_MITM: "1" });
-    _resetNamedProviderWarningsForTest();
-    loadRoutes();
-    assert.equal(warnings.length, 1, `expected exactly one warning, got: ${JSON.stringify(warnings)}`);
-    assert.ok(warnings[0].includes('Add a "mitm://api.anthropic.com" entry'), warnings[0]);
-});
-
 test("#3632 A4: BILI_MITM=0 silences the warning (no MITM lane at all)", (t) => {
     const warnings = captureWarnings(t);
     withFile(t, {
@@ -110,35 +83,6 @@ test("#3632 A4: BILI_MITM=0 silences the warning (no MITM lane at all)", (t) => 
     _resetNamedProviderWarningsForTest();
     loadRoutes();
     assert.deepEqual(warnings, []);
-});
-
-test("#3632 A5: path-scoped twins — a pathless mitm:// key covers deeper https:// paths; a sibling path does not", (t) => {
-    const covered = captureWarnings(t);
-    withFile(t, {
-        providers: {
-            "https://opencode.ai/v1": { models: { m: { context: 1000 } } },
-            "mitm://opencode.ai": { models: { m: { context: 2000 } } },
-        },
-        mitm: { domains: ["opencode.ai"] },
-    });
-    setEnv(t, { BILI_MITM: "1" });
-    _resetNamedProviderWarningsForTest();
-    loadRoutes();
-    assert.deepEqual(covered, [], `pathless twin must cover /v1: ${JSON.stringify(covered)}`);
-
-    const uncovered = captureWarnings(t);
-    withFile(t, {
-        providers: {
-            "https://opencode.ai/v1": { models: { m: { context: 1000 } } },
-            "mitm://opencode.ai/v2": { models: { m: { context: 2000 } } },
-        },
-        mitm: { domains: ["opencode.ai"] },
-    });
-    setEnv(t, { BILI_MITM: "1" });
-    _resetNamedProviderWarningsForTest();
-    loadRoutes();
-    assert.equal(uncovered.length, 1, `sibling-path twin must NOT cover /v1: ${JSON.stringify(uncovered)}`);
-    assert.ok(uncovered[0].includes('Add a "mitm://opencode.ai/v1" entry'), uncovered[0]);
 });
 
 test("#3632 A6: no false positives — non-whitelisted host, http:// scheme, and bare marker entries stay quiet", (t) => {
@@ -155,20 +99,6 @@ test("#3632 A6: no false positives — non-whitelisted host, http:// scheme, and
     _resetNamedProviderWarningsForTest();
     loadRoutes();
     assert.deepEqual(warnings, [], JSON.stringify(warnings));
-});
-
-test("#3632 A7: the warning fires once per key across repeated loads (hot-reload safe)", (t) => {
-    const warnings = captureWarnings(t);
-    withFile(t, {
-        providers: { "https://opencode.ai": { models: { m: { context: 1000 } } } },
-        mitm: { domains: ["opencode.ai"] },
-    });
-    setEnv(t, { BILI_MITM: "1" });
-    _resetNamedProviderWarningsForTest();
-    loadRoutes();
-    loadRoutes();
-    loadRoutes();
-    assert.equal(warnings.length, 1, `expected one warning across three loads, got: ${JSON.stringify(warnings)}`);
 });
 
 test("#3632 B1: runtime route-miss on the MITM lane names the scheme mismatch", () => {

@@ -91,6 +91,7 @@ function parseRelease(raw: unknown): ChangelogRelease | undefined {
 }
 
 async function runCheck(): Promise<void> {
+    if (GITHUB_RELEASES_URL) return; // AaaS fork: no GitHub releases fetch
     try {
         const result = await fetchWithTimeout(
             GITHUB_RELEASES_URL,

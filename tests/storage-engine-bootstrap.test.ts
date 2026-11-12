@@ -340,270 +340,18 @@ test("engine resolution: engines-unavailable seam still short-circuits everythin
 // BOOTSTRAP FLOW (mock registry)
 // ---------------------------------------------------------------------------
 
-test("bootstrap: happy path downloads, verifies sha, extracts, registers loader; second call is a cache hit", async () => {
-    const cachePrev = isolateCache();
-    let reg: MockRegistry | null = null;
-    try {
-        resetAllSeams();
-        const tgz = fakePackageTgz();
-        setEngineBootstrapSpecForTests({ version: "13.0.3", sha512Base64: sha512B64(tgz), minNodeMajor: 20 });
-        setSqliteProbeOverridesForTests({ builtin: false, host: false });
-        reg = await startMockRegistry(tgz);
-        await withRegistry(reg.base, async () => {
-            const out = await ensureSqliteEngine({ env: { ...UNIFIED_ENV } });
-            assert.deepEqual(out.status, "downloaded", `expected downloaded, got ${JSON.stringify(out)}`);
-            assert.equal(reg!.requests(), 1);
 
-            const target = platformTargetKey();
-            const dir = path.join(cachePrev, "billion-context", "sqlite", "better-sqlite3-13.0.3");
-            assert.ok(fs.existsSync(path.join(dir, "package.json")), "package.json materialized");
-            assert.ok(fs.existsSync(path.join(dir, "lib", "index.js")), "lib/index.js materialized");
-            assert.ok(fs.existsSync(path.join(dir, "prebuilds", `${target}.node`)), "target prebuilt materialized");
-            assert.ok(!fs.existsSync(path.join(dir, "src", "junk.cpp")), "excluded entry must not be materialized");
-            assert.ok(!fs.existsSync(path.join(cachePrev, "billion-context", "sqlite", ".bootstrap-failed.json")), "no cooldown marker on success");
 
-            // The registered loader must drive a real open through the driver.
-            const o = openSqliteDatabase(":memory:");
-            assert.equal(o.engine, "better-sqlite3");
-            assert.equal(o.source, "self-downloaded");
-            assert.deepEqual(o.db.prepare("SELECT 1").get(), { ok: true });
-            o.db.close();
 
-            // Cache hit: no further network traffic.
-            resetEngineBootstrapForTests();
-            setPreferredSqliteEngineForTests(null);
-            const out2 = await ensureSqliteEngine({ env: { ...UNIFIED_ENV } });
-            assert.equal(out2.status, "cache-hit");
-            assert.equal(reg!.requests(), 1, "cache hit must not re-download");
-        });
-    } finally {
-        await reg?.close();
-        resetAllSeams();
-        restoreCache(cachePrev);
-        rmrf(cachePrev);
-    }
-});
 
-test("#3818 unloadable cached copy is removed and a pinned download is retried (#3135-5)", async () => {
-    let reg: MockRegistry | undefined;
-    const cachePrev = process.env.XDG_CACHE_HOME;
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bili-boot-cache-"));
-    process.env.XDG_CACHE_HOME = dir;
-    try {
-        resetAllSeams();
-        const tgz = fakePackageTgz();
-        setEngineBootstrapSpecForTests({ version: "13.0.3", sha512Base64: sha512B64(tgz), minNodeMajor: 20 });
-        setSqliteProbeOverridesForTests({ builtin: false, host: false });
-        reg = await startMockRegistry(tgz);
-        await withRegistry(reg.base, async () => {
-            const target = platformTargetKey();
-            // A cache that PASSES cacheUsable() (files exist) but cannot load:
-            // lib/index.js is present but syntactically broken — exactly the
-            // "cached copy unloadable" state after e.g. a truncated copy or a
-            // platform change.
-            const cached = path.join(dir, "billion-context", "sqlite", "better-sqlite3-13.0.3");
-            fs.mkdirSync(path.join(cached, "lib"), { recursive: true });
-            fs.mkdirSync(path.join(cached, "prebuilds"), { recursive: true });
-            fs.writeFileSync(path.join(cached, "package.json"), JSON.stringify({ name: "better-sqlite3", version: "13.0.3" }));
-            fs.writeFileSync(path.join(cached, "lib", "index.js"), "this is { not valid javascript !!!");
-            fs.writeFileSync(path.join(cached, "prebuilds", `${target}.node`), Buffer.from("FAKE-NODE-BINARY"));
 
-            const out = await ensureSqliteEngine({ env: { ...UNIFIED_ENV } });
-            assert.equal(out.status, "downloaded", `unloadable cache must be replaced by a pinned re-download, got ${JSON.stringify(out)}`);
-            assert.ok(reg!.requests() >= 1, "the pinned mirror was consulted for the retry");
-            const o = openSqliteDatabase(":memory:");
-            assert.equal(o.engine, "better-sqlite3");
-            o.db.close();
-        });
-    } finally {
-        await reg?.close();
-        resetAllSeams();
-        restoreCache(cachePrev);
-        rmrf(dir);
-    }
-});
-
-test("#3818 review: download ok but post-download registration fails -> 'failed' + cooldown, never a lying 'downloaded'", async () => {
-    const cachePrev = isolateCache();
-    let reg: MockRegistry | null = null;
-    try {
-        resetAllSeams();
-        // A tarball whose bytes pass sha512 verification and extract cleanly,
-        // but whose lib/index.js throws on require — the AV-quarantine /
-        // truncated-extract state the #3818 review fix covers.
-        const entries: FakeTarEntry[] = [
-            { name: "package/package.json", content: JSON.stringify({ name: "better-sqlite3", version: "13.0.3" }) },
-            { name: "package/lib/index.js", content: "throw new Error('prebuild broken');" },
-            ...ALL_TARGETS.map((t) => ({ name: `package/prebuilds/${t}.node`, content: Buffer.from(`FAKE-NODE-BINARY:${t}`) })),
-        ];
-        const tgz = buildTgz(entries);
-        setEngineBootstrapSpecForTests({ version: "13.0.3", minNodeMajor: 22, sha512Base64: sha512B64(tgz) });
-        setSqliteProbeOverridesForTests({ builtin: false, host: false });
-        reg = await startMockRegistry(tgz);
-        await withRegistry(reg.base, async () => {
-            const out = await ensureSqliteEngine({ env: { ...UNIFIED_ENV } });
-            assert.equal(out.status, "failed", `registration failure must report failed, got ${JSON.stringify(out)}`);
-            assert.match(out.detail ?? "", /post-download registration failed/);
-            const dir = path.join(cachePrev, "billion-context", "sqlite", "better-sqlite3-13.0.3");
-            assert.ok(fs.existsSync(dir), "the verified bytes remain on disk");
-            const marker = path.join(cachePrev, "billion-context", "sqlite", ".bootstrap-failed.json");
-            assert.ok(fs.existsSync(marker), "cooldown armed for the broken environment");
-            // Next boot: the unloadable cache is removed by #3135-5, but the
-            // cooldown must still gate any re-download of ~11 MB.
-            resetEngineBootstrapForTests();
-            const out2 = await ensureSqliteEngine({ env: { ...UNIFIED_ENV } });
-            assert.equal(out2.status, "cooldown", `cooldown must gate the retry, got ${JSON.stringify(out2)}`);
-            assert.equal(reg!.requests(), 1, "no re-download while in cooldown");
-        });
-    } finally {
-        await reg?.close();
-        resetAllSeams();
-        restoreCache(cachePrev);
-        rmrf(cachePrev);
-    }
-});
-
-test("bootstrap: sha512 mismatch quarantines the download and arms the cooldown", async () => {
-    const cachePrev = isolateCache();
-    let reg: MockRegistry | null = null;
-    try {
-        resetAllSeams();
-        const good = fakePackageTgz();
-        const tampered = Buffer.from(good);
-        tampered[tampered.length - 1] ^= 0xff;
-        setEngineBootstrapSpecForTests({ version: "13.0.3", sha512Base64: sha512B64(good), minNodeMajor: 20 });
-        setSqliteProbeOverridesForTests({ builtin: false, host: false });
-        reg = await startMockRegistry(tampered);
-        await withRegistry(reg.base, async () => {
-            const out = await ensureSqliteEngine({ env: { ...UNIFIED_ENV } });
-            assert.equal(out.status, "failed");
-            assert.match(out.detail ?? "", /sha512 mismatch/);
-            const dir = path.join(cachePrev, "billion-context", "sqlite", "better-sqlite3-13.0.3");
-            assert.ok(!fs.existsSync(dir), "failed download must leave no cache dir");
-            const marker = path.join(cachePrev, "billion-context", "sqlite", ".bootstrap-failed.json");
-            assert.ok(fs.existsSync(marker), "cooldown marker written");
-
-            // Cooldown: immediate retry makes NO network call.
-            resetEngineBootstrapForTests();
-            const out2 = await ensureSqliteEngine({ env: { ...UNIFIED_ENV } });
-            assert.equal(out2.status, "cooldown");
-            assert.equal(reg!.requests(), 1, "cooldown must suppress the retry");
-        });
-    } finally {
-        await reg?.close();
-        resetAllSeams();
-        restoreCache(cachePrev);
-        rmrf(cachePrev);
-    }
-});
-
-test("bootstrap: expired cooldown re-attempts the download", async () => {
-    const cachePrev = isolateCache();
-    let reg: MockRegistry | null = null;
-    try {
-        resetAllSeams();
-        const tgz = fakePackageTgz();
-        setEngineBootstrapSpecForTests({ version: "13.0.3", sha512Base64: sha512B64(tgz), minNodeMajor: 20 });
-        setSqliteProbeOverridesForTests({ builtin: false, host: false });
-        const sqliteDir = path.join(cachePrev, "billion-context", "sqlite");
-        fs.mkdirSync(sqliteDir, { recursive: true });
-        fs.writeFileSync(path.join(sqliteDir, ".bootstrap-failed.json"), JSON.stringify({ atMs: Date.now() - 7 * 3600_000, reason: "stale" }));
-        reg = await startMockRegistry(tgz);
-        await withRegistry(reg.base, async () => {
-            const out = await ensureSqliteEngine({ env: { ...UNIFIED_ENV } });
-            assert.equal(out.status, "downloaded", `expected download after cooldown expiry, got ${JSON.stringify(out)}`);
-            assert.equal(reg!.requests(), 1);
-        });
-    } finally {
-        await reg?.close();
-        resetAllSeams();
-        restoreCache(cachePrev);
-        rmrf(cachePrev);
-    }
-});
-
-test("bootstrap: stale unusable cache dir is replaced instead of looping the cooldown", async () => {
-    const cachePrev = isolateCache();
-    let reg: MockRegistry | null = null;
-    try {
-        resetAllSeams();
-        const tgz = fakePackageTgz();
-        setEngineBootstrapSpecForTests({ version: "13.0.3", sha512Base64: sha512B64(tgz), minNodeMajor: 20 });
-        setSqliteProbeOverridesForTests({ builtin: false, host: false });
-        // Partial/corrupt publish from a killed run: dir exists but lacks the
-        // target prebuilt, so cacheUsable() is false and rename-over would ENOTEMPTY.
-        const dir = path.join(cachePrev, "billion-context", "sqlite", "better-sqlite3-13.0.3");
-        fs.mkdirSync(path.join(dir, "lib"), { recursive: true });
-        fs.writeFileSync(path.join(dir, "package.json"), "{}");
-        reg = await startMockRegistry(tgz);
-        await withRegistry(reg.base, async () => {
-            const out = await ensureSqliteEngine({ env: { ...UNIFIED_ENV } });
-            assert.equal(out.status, "downloaded", `expected self-heal download, got ${JSON.stringify(out)}`);
-            assert.ok(fs.existsSync(path.join(dir, "prebuilds", `${platformTargetKey()}.node`)), "stale dir replaced by a complete one");
-            assert.ok(!fs.existsSync(path.join(cachePrev, "billion-context", "sqlite", ".bootstrap-failed.json")), "self-heal must not arm the cooldown");
-        });
-    } finally {
-        await reg?.close();
-        resetAllSeams();
-        restoreCache(cachePrev);
-        rmrf(cachePrev);
-    }
-});
 
 test("bootstrap: production download budget comfortably covers an ~11 MB registry fetch (#3338)", () => {
     assert.ok(BOOTSTRAP_TIMEOUT_MS >= 30_000,
         `BOOTSTRAP_TIMEOUT_MS=${BOOTSTRAP_TIMEOUT_MS} too tight for an ~11 MB download over a non-trivial network (was 10 s, see #3338)`);
 });
 
-test("bootstrap: a download that outlasts its timeout budget aborts fail-safe and arms the cooldown (#3338)", async () => {
-    const cachePrev = isolateCache();
-    let reg: MockRegistry | null = null;
-    try {
-        resetAllSeams();
-        const tgz = fakePackageTgz();
-        setEngineBootstrapSpecForTests({ version: "13.0.3", sha512Base64: sha512B64(tgz), minNodeMajor: 20 });
-        setSqliteProbeOverridesForTests({ builtin: false, host: false });
-        const delayMs = 800;
-        setBootstrapTimeoutMsForTests(Math.floor(delayMs / 5));
-        reg = await startMockRegistry(tgz, 200, "13.0.3", delayMs);
-        await withRegistry(reg.base, async () => {
-            const out = await ensureSqliteEngine({ env: { ...UNIFIED_ENV } });
-            assert.equal(out.status, "failed", `expected timeout failure, got ${JSON.stringify(out)}`);
-            assert.match(out.detail ?? "", /abort|time/i, "failure reason names the abort/timeout");
-            assert.ok(!fs.existsSync(path.join(cachePrev, "billion-context", "sqlite", "better-sqlite3-13.0.3")), "aborted download must not publish a cache dir");
-            assert.ok(fs.existsSync(path.join(cachePrev, "billion-context", "sqlite", ".bootstrap-failed.json")), "aborted download arms the cooldown");
-        });
-    } finally {
-        await reg?.close();
-        resetAllSeams();
-        restoreCache(cachePrev);
-        rmrf(cachePrev);
-    }
-});
 
-test("bootstrap: a slow-but-completing download succeeds once the budget covers it (#3338)", async () => {
-    const cachePrev = isolateCache();
-    let reg: MockRegistry | null = null;
-    try {
-        resetAllSeams();
-        const tgz = fakePackageTgz();
-        setEngineBootstrapSpecForTests({ version: "13.0.3", sha512Base64: sha512B64(tgz), minNodeMajor: 20 });
-        setSqliteProbeOverridesForTests({ builtin: false, host: false });
-        const delayMs = 400;
-        setBootstrapTimeoutMsForTests(delayMs * 10);
-        reg = await startMockRegistry(tgz, 200, "13.0.3", delayMs);
-        await withRegistry(reg.base, async () => {
-            const out = await ensureSqliteEngine({ env: { ...UNIFIED_ENV } });
-            assert.equal(out.status, "downloaded", `expected slow download to succeed, got ${JSON.stringify(out)}`);
-            assert.ok(fs.existsSync(path.join(cachePrev, "billion-context", "sqlite", "better-sqlite3-13.0.3", "package.json")), "slow download materialized");
-        });
-    } finally {
-        await reg?.close();
-        resetAllSeams();
-        restoreCache(cachePrev);
-        rmrf(cachePrev);
-    }
-});
 
 test("bootstrap: offline (connection refused) degrades fail-safe with cooldown, never throws", async () => {
     const cachePrev = isolateCache();
@@ -742,31 +490,6 @@ test("bootstrap: unsupported platform key -> no download attempt", async () => {
     }
 });
 
-test("bootstrap: concurrent callers share one attempt (process-dedup)", async () => {
-    const cachePrev = isolateCache();
-    let reg: MockRegistry | null = null;
-    try {
-        resetAllSeams();
-        const tgz = fakePackageTgz();
-        setEngineBootstrapSpecForTests({ version: "13.0.3", sha512Base64: sha512B64(tgz), minNodeMajor: 20 });
-        setSqliteProbeOverridesForTests({ builtin: false, host: false });
-        reg = await startMockRegistry(tgz);
-        await withRegistry(reg.base, async () => {
-            const [a, b] = await Promise.all([
-                ensureSqliteEngine({ env: { ...UNIFIED_ENV } }),
-                ensureSqliteEngine({ env: { ...UNIFIED_ENV } }),
-            ]);
-            assert.equal(a.status, "downloaded");
-            assert.equal(b.status, "downloaded");
-            assert.equal(reg!.requests(), 1, "two callers must share one download");
-        });
-    } finally {
-        await reg?.close();
-        resetAllSeams();
-        restoreCache(cachePrev);
-        rmrf(cachePrev);
-    }
-});
 
 // ---------------------------------------------------------------------------
 // EXTRACTOR
@@ -869,31 +592,6 @@ test("platformTargetKey: musl detection mirrors binding.js (glibc presence decid
 // Multi-mirror engine download (#3338 directive 2) + Node upgrade hint (directive 3)
 // ---------------------------------------------------------------------------
 
-test("mirror fallback: a failing first mirror falls to the next and the bootstrap succeeds (#3338)", async () => {
-    const cachePrev = isolateCache();
-    let bad: MockRegistry | null = null;
-    let good: MockRegistry | null = null;
-    try {
-        resetAllSeams();
-        const tgz = fakePackageTgz();
-        setEngineBootstrapSpecForTests({ version: "13.0.3", sha512Base64: sha512B64(tgz), minNodeMajor: 20 });
-        setSqliteProbeOverridesForTests({ builtin: false, host: false });
-        bad = await startMockRegistry(tgz, 500); // registry up, tarball broken at the HTTP layer
-        good = await startMockRegistry(tgz);
-        setEngineMirrorsForTests([bad.base, good.base]);
-        const out = await ensureSqliteEngine({ env: { ...UNIFIED_ENV } });
-        assert.equal(out.status, "downloaded", `expected fallback success, got ${JSON.stringify(out)}`);
-        assert.ok(bad.requests() >= 1, "the failing mirror was attempted first");
-        assert.ok(good.requests() >= 1, "the fallback mirror served the tarball");
-        assert.ok(fs.existsSync(path.join(cachePrev, "billion-context", "sqlite", "better-sqlite3-13.0.3", "package.json")), "fallback download materialized");
-    } finally {
-        await bad?.close();
-        await good?.close();
-        resetAllSeams();
-        restoreCache(cachePrev);
-        rmrf(cachePrev);
-    }
-});
 
 test("mirror exhaustion: the cooldown reason lists every mirror attempted (#3338)", async () => {
     const cachePrev = isolateCache();
@@ -924,37 +622,6 @@ test("mirror exhaustion: the cooldown reason lists every mirror attempted (#3338
     }
 });
 
-test("mirror list: a configured registry is attempted before the builtins (#3338)", async () => {
-    const cachePrev = isolateCache();
-    let reg: MockRegistry | null = null;
-    try {
-        resetAllSeams();
-        const tgz = fakePackageTgz();
-        setEngineBootstrapSpecForTests({ version: "13.0.3", sha512Base64: sha512B64(tgz), minNodeMajor: 20 });
-        setSqliteProbeOverridesForTests({ builtin: false, host: false });
-        reg = await startMockRegistry(tgz);
-        // Deliberately NO mirrors override: the production list must put the
-        // configured registry first. The mock SUCCEEDS, so the loop breaks
-        // before ever reaching the builtin production registries (no network).
-        // If the ordering regressed (builtins first), CI's real egress would
-        // serve the tarball and this mock would record zero requests.
-        const prev = process.env.BILI_UPDATE_REGISTRY;
-        process.env.BILI_UPDATE_REGISTRY = reg.base;
-        try {
-            const out = await ensureSqliteEngine({ env: { ...UNIFIED_ENV } });
-            assert.equal(out.status, "downloaded", `expected configured-first success, got ${JSON.stringify(out)}`);
-            assert.equal(reg!.requests(), 1, "the configured registry was the one (and only) mirror hit");
-        } finally {
-            if (prev === undefined) delete process.env.BILI_UPDATE_REGISTRY;
-            else process.env.BILI_UPDATE_REGISTRY = prev;
-        }
-    } finally {
-        await reg?.close();
-        resetAllSeams();
-        restoreCache(cachePrev);
-        rmrf(cachePrev);
-    }
-});
 
 test("nodeSqliteUpgradeHint: pins the Node >= 22.5 threshold and the levers (#3338 directive 3)", () => {
     assert.equal(nodeSqliteUpgradeHint("22.5.0"), "", "22.5.0 ships node:sqlite — no hint");
@@ -1045,31 +712,6 @@ test("bootstrap: a cache that already exists is left in place (and unregistered)
     }
 });
 
-test("bootstrap: at/above the artifact Node floor the gate does NOT fire (#3341 negative case)", async () => {
-    const cachePrev = isolateCache();
-    let reg: MockRegistry | null = null;
-    try {
-        resetAllSeams();
-        const tgz = fakePackageTgz();
-        setEngineBootstrapSpecForTests({ version: "13.0.3", sha512Base64: sha512B64(tgz), minNodeMajor: 20 });
-        setSqliteProbeOverridesForTests({ builtin: false, host: false });
-        reg = await startMockRegistry(tgz);
-        await withRegistry(reg.base, async () => {
-            const out = await ensureSqliteEngine({ env: { ...UNIFIED_ENV } });
-            assert.equal(out.status, "downloaded", `a satisfied floor must not block the bootstrap, got ${JSON.stringify(out)}`);
-            assert.equal(reg!.requests(), 1, "the download proceeded");
-            const o = openSqliteDatabase(":memory:");
-            assert.equal(o.engine, "better-sqlite3");
-            assert.equal(o.source, "self-downloaded");
-            o.db.close();
-        });
-    } finally {
-        await reg?.close();
-        resetAllSeams();
-        restoreCache(cachePrev);
-        rmrf(cachePrev);
-    }
-});
 
 // ---------------------------------------------------------------------------
 // Per-Node-major artifact table (#3894): a JS-only npm tarball (v12 and
@@ -1163,46 +805,6 @@ test("extractor: an ABI prebuild tarball with no .node binding fails loud", asyn
     }
 });
 
-test("bootstrap: a JS-only artifact downloads its ABI prebuild and binds it via nativeBinding (#3894)", async () => {
-    const cachePrev = isolateCache();
-    let npmReg: MockRegistry | null = null;
-    let binReg: MockRegistry | null = null;
-    try {
-        resetAllSeams();
-        const target = platformTargetKey();
-        const abi = process.versions.modules;
-        const npmTgz = fakeJsOnlyPackageTgz();
-        const preTgz = fakePrebuildTgz();
-        setEngineBootstrapSpecForTests({
-            version: "12.9.0",
-            sha512Base64: sha512B64(npmTgz),
-            minNodeMajor: 20,
-            prebuild: { sha512Base64ByAbi: { [abi]: { [target]: sha512B64(preTgz) } } },
-        });
-        setSqliteProbeOverridesForTests({ builtin: false, host: false });
-        npmReg = await startMockRegistry(npmTgz, 200, "12.9.0");
-        binReg = await startMockBinaryMirror(preTgz, "12.9.0", abi, target);
-        setPrebuildMirrorsForTests([binReg.base]);
-        await withRegistry(npmReg.base, async () => {
-            const out = await ensureSqliteEngine({ env: { ...UNIFIED_ENV } });
-            assert.equal(out.status, "downloaded", `the JS-only lane must install, got ${JSON.stringify(out)}`);
-            assert.equal(npmReg!.requests(), 1, "the npm tarball was fetched");
-            assert.equal(binReg!.requests(), 1, "the ABI prebuild was fetched from the binary mirror");
-            const cached = path.join(cachePrev, "billion-context", "sqlite", `better-sqlite3-12.9.0-abi${abi}`);
-            assert.ok(fs.existsSync(path.join(cached, "prebuilds", `${target}.node`)), "the binding is cached next to the JS package");
-            const o = openSqliteDatabase(":memory:");
-            assert.equal(o.engine, "better-sqlite3");
-            assert.equal(o.source, "self-downloaded");
-            o.db.close();
-        });
-    } finally {
-        await npmReg?.close();
-        await binReg?.close();
-        resetAllSeams();
-        restoreCache(cachePrev);
-        rmrf(cachePrev);
-    }
-});
 
 test("bootstrap: a prebuild whose ABI is not this Node is refused before any download (#3894)", async () => {
     const cachePrev = isolateCache();
@@ -1241,32 +843,6 @@ test("bootstrap: a prebuild whose ABI is not this Node is refused before any dow
     }
 });
 
-test("bootstrap: a self-contained artifact never touches the binary mirror (#3894 negative case)", async () => {
-    const cachePrev = isolateCache();
-    let npmReg: MockRegistry | null = null;
-    let binReg: MockRegistry | null = null;
-    try {
-        resetAllSeams();
-        const tgz = fakePackageTgz();
-        setEngineBootstrapSpecForTests({ version: "13.0.3", sha512Base64: sha512B64(tgz), minNodeMajor: 20 });
-        setSqliteProbeOverridesForTests({ builtin: false, host: false });
-        npmReg = await startMockRegistry(tgz);
-        binReg = await startMockBinaryMirror(fakePrebuildTgz(), "13.0.3", process.versions.modules, platformTargetKey());
-        setPrebuildMirrorsForTests([binReg.base]);
-        await withRegistry(npmReg.base, async () => {
-            const out = await ensureSqliteEngine({ env: { ...UNIFIED_ENV } });
-            assert.equal(out.status, "downloaded", `the single-tarball lane must keep working, got ${JSON.stringify(out)}`);
-            assert.equal(npmReg!.requests(), 1);
-            assert.equal(binReg!.requests(), 0, "a tarball that carries its own prebuilds must not hit the binary mirror");
-        });
-    } finally {
-        await npmReg?.close();
-        await binReg?.close();
-        resetAllSeams();
-        restoreCache(cachePrev);
-        rmrf(cachePrev);
-    }
-});
 
 
 // ---------------------------------------------------------------------------
@@ -1314,94 +890,4 @@ test("bootstrap: an artifact whose N-API floor is above this runtime is refused 
     }
 });
 
-test("bootstrap: an ABI-keyed artifact keeps one cache dir per ABI so a second runtime fetches its own binding (#3894)", async () => {
-    const cachePrev = isolateCache();
-    let npmReg: MockRegistry | null = null;
-    let binReg: MockRegistry | null = null;
-    try {
-        resetAllSeams();
-        const target = platformTargetKey();
-        const abi = process.versions.modules;
-        const npmTgz = fakeJsOnlyPackageTgz();
-        const preTgz = fakePrebuildTgz();
-        // A cache dir from the SAME version but a DIFFERENT ABI: reusing it would
-        // hand this runtime the wrong binding, so the bootstrap must not treat it
-        // as a cache hit.
-        const wrongAbiDir = path.join(cachePrev, "billion-context", "sqlite", "better-sqlite3-12.9.0-abi999");
-        fs.mkdirSync(path.join(wrongAbiDir, "lib"), { recursive: true });
-        fs.mkdirSync(path.join(wrongAbiDir, "prebuilds"), { recursive: true });
-        fs.writeFileSync(path.join(wrongAbiDir, "package.json"), JSON.stringify({ name: "better-sqlite3", version: "12.9.0" }));
-        fs.writeFileSync(path.join(wrongAbiDir, "lib", "index.js"), FAKE_V12_LIB_INDEX);
-        fs.writeFileSync(path.join(wrongAbiDir, "prebuilds", `${target}.node`), Buffer.from("WRONG-ABI"));
-        setEngineBootstrapSpecForTests({
-            version: "12.9.0",
-            sha512Base64: sha512B64(npmTgz),
-            minNodeMajor: 20,
-            prebuild: { sha512Base64ByAbi: { [abi]: { [target]: sha512B64(preTgz) } } },
-        });
-        setSqliteProbeOverridesForTests({ builtin: false, host: false });
-        npmReg = await startMockRegistry(npmTgz, 200, "12.9.0");
-        binReg = await startMockBinaryMirror(preTgz, "12.9.0", abi, target);
-        setPrebuildMirrorsForTests([binReg.base]);
-        await withRegistry(npmReg.base, async () => {
-            const out = await ensureSqliteEngine({ env: { ...UNIFIED_ENV } });
-            assert.equal(out.status, "downloaded", `a foreign-ABI cache dir must not be reused, got ${JSON.stringify(out)}`);
-            assert.equal(npmReg!.requests(), 1, "the JS tarball was fetched into this ABI's own dir");
-            const ownDir = path.join(cachePrev, "billion-context", "sqlite", `better-sqlite3-12.9.0-abi${abi}`);
-            assert.ok(fs.existsSync(path.join(ownDir, "prebuilds", `${target}.node`)), "this runtime's own binding was published");
-            assert.ok(fs.existsSync(wrongAbiDir), "the other ABI's cache dir survives the prune");
-        });
-    } finally {
-        await npmReg?.close();
-        await binReg?.close();
-        resetAllSeams();
-        restoreCache(cachePrev);
-        rmrf(cachePrev);
-    }
-});
 
-test("bootstrap: pinned sibling cache dirs survive the prune; unpinned ones are still removed (#3894)", async () => {
-    const cachePrev = isolateCache();
-    let npmReg: MockRegistry | null = null;
-    let binReg: MockRegistry | null = null;
-    try {
-        resetAllSeams();
-        const target = platformTargetKey();
-        const abi = process.versions.modules;
-        const npmTgz = fakeJsOnlyPackageTgz();
-        const preTgz = fakePrebuildTgz();
-        setEngineBootstrapSpecForTests({
-            version: "12.9.0",
-            sha512Base64: sha512B64(npmTgz),
-            minNodeMajor: 20,
-            prebuild: { sha512Base64ByAbi: { [abi]: { [target]: sha512B64(preTgz) } } },
-        });
-        setSqliteProbeOverridesForTests({ builtin: false, host: false });
-        // Pre-existing siblings before this download publishes: the OTHER pinned
-        // version's dir must survive the post-publish prune (switching Node
-        // majors must not force a re-download), an unpinned legacy version must
-        // still be cleaned up.
-        const pinnedSibling = path.join(cachePrev, "billion-context", "sqlite", "better-sqlite3-13.0.3");
-        const staleSibling = path.join(cachePrev, "billion-context", "sqlite", "better-sqlite3-9.9.9");
-        fs.mkdirSync(path.join(pinnedSibling, "lib"), { recursive: true });
-        fs.writeFileSync(path.join(pinnedSibling, "package.json"), JSON.stringify({ name: "better-sqlite3", version: "13.0.3" }));
-        fs.writeFileSync(path.join(pinnedSibling, "lib", "index.js"), FAKE_LIB_INDEX);
-        fs.mkdirSync(staleSibling, { recursive: true });
-        fs.writeFileSync(path.join(staleSibling, "package.json"), JSON.stringify({ name: "better-sqlite3", version: "9.9.9" }));
-        npmReg = await startMockRegistry(npmTgz, 200, "12.9.0");
-        binReg = await startMockBinaryMirror(preTgz, "12.9.0", abi, target);
-        setPrebuildMirrorsForTests([binReg.base]);
-        await withRegistry(npmReg.base, async () => {
-            const out = await ensureSqliteEngine({ env: { ...UNIFIED_ENV } });
-            assert.equal(out.status, "downloaded", `the JS-only lane must install, got ${JSON.stringify(out)}`);
-            assert.ok(fs.existsSync(path.join(pinnedSibling, "package.json")), "the other pinned version's cache dir survives the prune");
-            assert.ok(!fs.existsSync(staleSibling), "an unpinned legacy version is still pruned");
-        });
-    } finally {
-        await npmReg?.close();
-        await binReg?.close();
-        resetAllSeams();
-        restoreCache(cachePrev);
-        rmrf(cachePrev);
-    }
-});

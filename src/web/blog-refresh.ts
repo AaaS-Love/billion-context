@@ -131,6 +131,7 @@ function armSchedule(): void {
  *  server warm-up). Never throws: coalesces onto an in-flight round, skips
  *  silently outside the TTL unless force. */
 export function kickBlogRefresh(opts?: { force?: boolean }): void {
+    if (GITHUB_CONTENTS_URL) return; // AaaS fork: no GitHub blog fetch, no hourly schedule
     armSchedule(); // first touch in this process arms the hourly chain
     if (disabled || inflight !== undefined) return;
     const due = (opts?.force ?? false) || Date.now() - lastRoundStartedAt >= ROUND_TTL_MS;
