@@ -488,12 +488,9 @@ bili --bin /path/to/client   # launcher: spawn this exact client binary instead 
 
 Flags override env vars and the config file. `bili --help` lists them all.
 
-### Remote agents (`--host`)
+### Network exposure (AaaS fork)
 
-The proxy binds `127.0.0.1` only; the AaaS fork refuses any other host (see docs/AAAS-FORK.md).
-
-- `/bili/<absolute-url>` destination admission (#409): the proxy itself and link-local/metadata addresses are always denied; loopback/private destinations are allowed for local clients (self-hosted upstreams) and denied for remote clients unless listed in `BILI_TUNNEL_ALLOWED_HOSTS` (`host` or `host:port`, comma-separated). One exception (#1073): a **local** client relaying a management path (`/__bili/*`, `/__acp/*`) to a **loopback IP-literal** destination is forwarded unmarked; remote peers and hostname destinations keep the internal tunnel marker unconditionally, and management paths stay unreachable through the tunnel even via NAT hairpin. An absolute-form request addressed to the instance's own endpoint on a management path is served locally instead of tunneled (a forward-proxy-style health probe gets a real answer).
-- There is **no authentication**: only do this on a trusted LAN or behind a firewall. The `/__bili/` management endpoints remain loopback-only. A startup `[security]` warning reminds you of the above.
+The proxy binds `127.0.0.1` (or `::1`) only; the AaaS fork refuses any other `--host`, including `0.0.0.0` (see docs/AAAS-FORK.md). There is no remote-agent mode and no authentication to configure, because nothing but local processes can reach it. In a container, run it in the host network namespace (see the `Dockerfile` header).
 
 ### Debugging
 
